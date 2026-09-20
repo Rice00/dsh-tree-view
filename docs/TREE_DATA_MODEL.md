@@ -9,7 +9,7 @@ This document details how conversation versions and turns are represented, branc
 There are two distinct levels of data representation in the system:
 
 1. **Storage Level (Session DAG)**:
-   - DSH enforces session-level isolation. Each branch is a distinct DSH session record with `parentSession` and `seedLength`.
+   - DSH enforces session-level isolation. Each branch is a distinct DSH session record with `parentSession`, `isSeeded`, and a separate `inheritedEventCount`.
    - The host maintains durable `message-tree/version` markers detailing which turn was edited/retried and what changed.
 
 2. **Presentation Level (Turn-Level Branching Tree)**:

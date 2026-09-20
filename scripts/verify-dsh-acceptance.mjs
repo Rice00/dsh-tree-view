@@ -5,8 +5,9 @@ const url = new URL(base);
 assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname), 'Use a local acceptance server');
 async function state() {
   const response = await fetch(`${base}/qa/state`);
-  assert.equal(response.status, 200);
-  return response.json();
+  const result = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(result));
+  return result;
 }
 async function post(body) {
   const response = await fetch(`${base}/message-tree`, {
@@ -18,6 +19,15 @@ async function post(body) {
 }
 const before = await state();
 const isUser = event => event.type === 'user/message' && event.data.source.kind === 'user';
+// On the second invocation this must resume an already persisted seeded child,
+// not only read its log while creating another child from an unseeded root.
+const persistedBranch = before.sessions.find(session => session.header.isSeeded && !session.live
+  && session.events.some(event => event.type === 'message-tree/version' && event.data.sessionId === session.header.id));
+if (persistedBranch) {
+  const marker = persistedBranch.events.find(event => event.type === 'message-tree/version' && event.data.sessionId === persistedBranch.header.id);
+  await post({ action: 'retry', sessionId: persistedBranch.header.id, turn: marker.data.effect.targetTurn });
+  console.log('Persisted seeded branch resumed and retried successfully.');
+}
 for (const id of ['session-qa-live', 'session-qa-cold']) {
   const source = before.sessions.find(session => session.header.id === id);
   assert.ok(source, 'The acceptance fixture must be mounted');
@@ -34,6 +44,8 @@ for (const id of ['session-qa-live', 'session-qa-cold']) {
   assert.equal(edited.data.content[0].text, 'Edited in real DSH; retain both images.');
   assert.deepEqual(edited.data.content.filter(block => block.type === 'image'), original.data.content.filter(block => block.type === 'image'));
   assert.equal(child.events.filter(isUser).length, 1);
+  assert.equal(child.events.filter(event => event.type === 'turn/start').length, 1, 'The inherited inbox must not replay extra turns');
+  assert.equal(child.events[child.inheritedEventCount - 1].data.sessionId, child.header.id);
   assert.ok(child.events.findLast(event => event.type === 'assistant/message')?.data.message.content
     .some(block => block.text?.includes('Received 2 images')));
   const preserved = after.sessions.find(session => session.header.id === id).events;

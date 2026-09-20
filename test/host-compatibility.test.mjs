@@ -45,7 +45,7 @@ function harness(modern, resumed = false) {
     return agent;
   }
   const root = makeSession('source', []);
-  append(root, 'request/header', { header: { config: { provider: 'qa', model: 'qa' } } });
+  append(root, 'request/header', { header: { config: { provider: 'qa', model: 'qa', reasoningEffort: 'max' } } });
   const originalImage = { type: 'image', attachment: { attachmentId: 'sha256:qa-image' } };
   const prompt = value => ({ id: `message-${value}`, role: 'user', source: { kind: 'user' }, content: [
     { type: 'text', text: value }, structuredClone(originalImage),
@@ -92,8 +92,16 @@ function harness(modern, resumed = false) {
           assert.equal(options.meta.isSeeded, true);
           assert.equal(options.meta.seedLength, undefined);
           assert.ok(Number.isSafeInteger(options.inheritedEventCount));
+          assert.equal(options.inheritedEventCount, options.seed.length,
+            'DSH 0.1.5 requires the complete constructor seed to be inherited');
         } else assert.ok(Number.isSafeInteger(options.meta.seedLength));
         const agent = agentFor(record, options.agentOptions);
+        // A durable inbox reconstructed from the rewound seed still contains
+        // the old input. Setup must clear it before create publishes the agent.
+        let pending = modern;
+        agent.inbox = { clear() { pending = false; } };
+        await options.setup?.({}, agent);
+        assert.equal(pending, false, 'Inherited pending input must not auto-run');
         return { agent, async dispose() { records.delete(options.sessionId); agents.delete(options.sessionId); } };
       },
     },
@@ -130,10 +138,11 @@ for (const modern of [false, true]) {
       assert.deepEqual(h.records.get('source').events, before, 'The original history remains unchanged');
       assert.equal(child.events.filter(event => event.type === 'user/message').length, 1);
       assert.equal(child.session.header.parentSession, 'source');
-      assert.equal(modern ? child.session.inheritedEventCount : child.session.header.seedLength, 1);
+      assert.equal(modern ? child.session.inheritedEventCount : child.session.header.seedLength, modern ? 2 : 1);
       assert.equal(child.events[1].type, 'message-tree/version');
       assert.equal(child.events[1].ignorable, true);
       assert.deepEqual(h.attached, [childId]);
+      assert.equal(h.creations[0].agentOptions.reasoningEffort, 'max');
       assert.equal(h.resumes, resumed ? 1 : 0);
       const tree = await h.request('GET', undefined, childId);
       assert.equal(tree.status, 200, JSON.stringify(tree.body));

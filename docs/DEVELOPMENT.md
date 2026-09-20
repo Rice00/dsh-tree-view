@@ -93,7 +93,7 @@ To add new tests, edit [`test/tree.test.mjs`](file:///D:/dsh-plugin-message-edit
 ### Optional real DSH acceptance
 
 `test/fixtures/dsh-acceptance.mjs` is an offline model adapter and live/cold
-session fixture for an installed official DSH `0.1.2-rc.1` runtime. Mount it
+session fixture for an installed official DSH `0.1.5-rc.2` runtime. Mount it
 only in a new temporary home whose name contains `message-edit-dsh-qa-`.
 Set `DSH_HOME` to that home and `DSH_QA_MODULES` to the official runtime's
 `node_modules` directory. Use a separate Web profile with the base/Web bundles,
@@ -112,6 +112,18 @@ the same isolated server and repeat to exercise persisted branches. The fixture
 adds `/qa/state` and `/qa/followup` endpoints solely for this disposable test.
 Browser acceptance additionally checks the settings entry, version switcher,
 thumbnails, and native original-image viewer. No remote API key is needed.
+
+For an automated fresh-boot and restart run, set `DSH_QA_MODULES` to the
+official runtime's `node_modules` directory and run:
+
+```bash
+node scripts/run-dsh-acceptance.mjs
+```
+
+The runner owns and removes a unique temporary home, boots the official CLI
+on an OS-selected port, runs the verifier, restarts the host, and repeats.
+The restart pass explicitly resumes and retries an already seeded branch.
+CI runs this on Linux and Windows in addition to the regression suite.
 
 ---
 

@@ -38,3 +38,26 @@ jobs:
       - run: npm run check:package
       - name: Ensure checks did not modify tracked files
         run: git diff --exit-code
+
+  official-host:
+    name: DSH 0.1.5-rc.2 / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install published official runtime
+        run: npm install --prefix "${{ runner.temp }}/dsh-runtime" --no-audit --no-fund @deepseek-ai/dsh@0.1.5-rc.2
+      - name: Verify real edits and restart persistence with an offline model
+        run: node scripts/run-dsh-acceptance.mjs
+        env:
+          DSH_QA_MODULES: ${{ runner.temp }}/dsh-runtime/node_modules

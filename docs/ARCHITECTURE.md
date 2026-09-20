@@ -30,15 +30,18 @@ Because DSH session event logs are append-only without native in-session branchi
 - Normalizes DSH sessions through `lib/session-record.js`: current live sessions
   expose `snapshotEvents()`, query snapshots carry their header in `session`,
   and older records expose `events` / `header`. Invalid logs fail explicitly.
-- Current DSH branches use `meta.isSeeded` plus `inheritedEventCount`; older
-  hosts use `meta.seedLength`. The normalized inherited cut prevents a nested
-  branch from mistaking an inherited version marker for its own marker.
+- DSH 0.1.5 branches use `meta.isSeeded` plus `inheritedEventCount`, which must
+  equal the complete constructor seed length. New markers carry their owning
+  `sessionId`; old markers without that field use the legacy inherited cut.
+  Cold logs use `observeSession(..., { projectionMode: 'none' })` and release
+  the observation lease; this restores seeded sessions through the correct API.
 - Registers the `/message-tree` HTTP route on `ctx.webServer`.
 - Owns branch creation transactions (`POST /message-tree`):
   1. Truncates parent events up to the target turn.
-  2. Seeds a new DSH session with the prefix events.
-  3. Appends a durable `message-tree/version` marker with `ignorable: true`.
-  4. Submits the edited prompt into the new session.
+  2. Adds an ignorable `message-tree/version` marker to the constructor seed.
+  3. Creates the agent and clears both inherited inbox queues in its setup,
+     before publication can schedule the rewound original input.
+  4. Flushes the branch and submits the edited prompt exactly once.
 - Owns graph queries (`GET /message-tree?sessionId=...`):
   - Traverses the session family DAG.
   - Recovers deleted/ghost ancestors from surviving descendants' event logs.
@@ -56,13 +59,14 @@ Because DSH session event logs are append-only without native in-session branchi
 
 DSH sessions are immutable append-only logs. When branching:
 
-1. **Seed Inheritance**: A new session is initialized whose log begins with an exact clone of the parent's event log up to the start of the edited turn (`seedLength`).
-2. **Durable Marker**: The host appends a custom event:
+1. **Seed Inheritance**: Copy the parent prefix before the edited turn, then add the plugin marker. The full constructor seed is inherited on DSH 0.1.5; the kernel adds its own `session/end-seed` afterwards.
+2. **Durable Marker**: The seed carries a custom event with explicit child ownership:
    ```json
    {
      "type": "message-tree/version",
      "data": {
        "schemaVersion": 1,
+       "sessionId": "child-session-id",
        "effect": {
          "operation": "edit",
          "targetTurn": 1,

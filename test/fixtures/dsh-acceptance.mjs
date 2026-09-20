@@ -14,13 +14,20 @@ const { default: sharp } = await import(pathToFileURL(require.resolve('sharp')))
 
 class LocalReply extends LlmAdapter {
   async resolveModel(provider, model) {
-    return { provider, id: model, name: 'Local acceptance model', inputModalities: ['text', 'image'] };
+    return { provider, id: model, name: 'Local acceptance model', inputModalities: ['text', 'image'],
+      reasoning: { efforts: [{ id: 'high', name: 'High' }, { id: 'max', name: 'Max' }] } };
   }
   async listModels(provider) { return [await this.resolveModel(provider, 'qa-model')]; }
   async *stream(options) {
+    const probe = options.messages.findLast(message => message.source.plugin === 'dsh-plugin-rollout-scout');
+    if (probe) {
+      const prompt = probe.content.find(block => block.type === 'text')?.text ?? '';
+      if (prompt === 'qa-error') throw new Error('Offline QA model failure');
+      yield { type: 'reasoning-delta', index: 0, text: "I'll validate this offline probe with a deterministic local reply." };
+    }
     const last = options.messages.findLast(message => message.source.kind === 'user');
     const imageCount = last?.content.filter(block => block.type === 'image').length ?? 0;
-    yield { type: 'text-delta', index: 0, text: `Local QA reply. Received ${imageCount} images.` };
+    yield { type: 'text-delta', index: probe ? 1 : 0, text: `Local QA reply. Received ${imageCount} images.` };
     yield { type: 'finish', reason: { kind: 'stop' } };
   }
 }
@@ -66,15 +73,24 @@ export async function apply(ctx) {
     if (cold) await handle.dispose();
   }
   ctx.webServer.register({ kind: 'exact', path: '/qa/state', handler: async (_req, res) => {
+    try {
     const sessions = await Promise.all((await ctx.sessionQuery.listSessions()).map(async ({ header }) => {
       await ctx.agents.get(header.id)?.whenIdle();
       const live = ctx.sessions.get(header.id);
       if (live) await ctx.sessions.flush(live);
-      const snapshot = await ctx.sessionQuery.readSession(header.id);
-      return { ...snapshot, header: snapshot.session ?? snapshot.header, live: !!live };
+      const observation = await ctx.sessionQuery.observeSession(header.id, { projectionMode: 'none' });
+      try {
+        return { header: observation.header, events: observation.events,
+          inheritedEventCount: observation.inheritedEventCount, live: !!live };
+      } finally { observation[Symbol.dispose](); }
     }));
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ sessions }));
+    } catch (error) {
+      console.error('QA state failed:', error);
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: String(error), stack: error.stack }));
+    }
   } });
   ctx.webServer.register({ kind: 'exact', path: '/qa/followup', handler: async (req, res) => {
     let body = '';

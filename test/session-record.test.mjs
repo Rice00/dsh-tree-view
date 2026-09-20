@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { sessionEvents, sessionEventCount, sessionRecord } from '../lib/session-record.js';
+import { sessionEvents, sessionEventCount, sessionRecord, readSessionRecord } from '../lib/session-record.js';
 
 test('live snapshot API takes precedence over a retired events getter', () => {
   const events = Object.freeze([]);
@@ -35,4 +35,23 @@ test('seeded modern records require a valid inherited cut', () => {
       header: { id: 'seeded', isSeeded: true }, events: [{}], inheritedEventCount: cut,
     }), /继承事件边界无效/);
   }
+});
+
+test('cold seeded histories use the restored observation API and release the lease', async () => {
+  let disposed = 0;
+  const observation = { header: { id: 'child', isSeeded: true }, events: [{}, {}], inheritedEventCount: 1,
+    [Symbol.dispose]() { disposed++; } };
+  const ctx = { sessions: { get() {} }, sessionQuery: {
+    async observeSession(id, options) {
+      assert.equal(id, 'child');
+      assert.equal(options.projectionMode, 'none');
+      return observation;
+    },
+    readSession() { throw new Error('DSH 0.1.5 readSession incorrectly validates restored logs as new seeds'); },
+  } };
+  assert.equal((await readSessionRecord(ctx, 'child')).inheritedEventCount, 1);
+  assert.equal(disposed, 1);
+  observation.inheritedEventCount = 3;
+  await assert.rejects(readSessionRecord(ctx, 'child'), /继承事件边界无效/);
+  assert.equal(disposed, 2, 'Validation failures must release the observation too');
 });

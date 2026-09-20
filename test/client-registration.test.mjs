@@ -27,7 +27,7 @@ test('declared client dependencies make the UI services available for registrati
     register: spec => { registered.push(spec.name); return () => {}; },
   };
   plugin.apply({
-    get: name => name === 'slots' && pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-slots') ? slots
+    get: name => name === 'slots' && pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-renderer') ? slots
       : name === 'sessions' && pkg.dsh.client.inject.includes('@deepseek-ai/dsh-api-session-controller') ? { open() {} } : undefined,
     effect: fn => fn(),
   });
