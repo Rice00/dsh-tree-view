@@ -912,6 +912,13 @@ const CSS = [
   '.mtx-edge[data-path]{stroke:var(--dsw-alias-accent-primary,#4b8dff);stroke-width:2}',
   '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));box-shadow:0 2px 10px rgba(0,0,0,.14);cursor:pointer;will-change:transform;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
   '.mtx-card:hover{box-shadow:0 6px 22px rgba(0,0,0,.24);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent)}',
+  // Two different facts, two different strengths. `data-current` is the session
+  // being read right now; `data-path` is the lineage that leads to where you are
+  // — and when you open a branch, the shared history above the fork is on that
+  // lineage, not "current". It used to show only as a tinted icon, which read as
+  // "the highlight disappeared". It gets a visible frame now, defined before the
+  // current rule so the session you are in still outranks it.
+  '.mtx-card[data-path]{border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 7%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)))}',
   '.mtx-card[data-current]{border-color:var(--dsw-alias-accent-primary,#4b8dff);box-shadow:0 0 0 1px var(--dsw-alias-accent-primary,#4b8dff),0 6px 24px color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 30%,transparent)}',
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px rgba(0,0,0,.3);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
