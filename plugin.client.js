@@ -274,6 +274,23 @@ const treeStore = {
     this.notify();
   },
 
+  /**
+   * Patch one version inside the cached family.
+   *
+   * The host answers a move immediately, but the refetch that follows is a
+   * round trip; without this the menu would still offer "collect into the tree"
+   * right after doing exactly that. The refetch then reconciles whatever the
+   * host actually settled on.
+   */
+  patchVersion(sessionId, versionSessionId, patch) {
+    const entry = this.bySession.get(sessionId);
+    if (!entry || !Array.isArray(entry.versions)) return;
+    const versions = entry.versions.map(function (v) {
+      return v && v.sessionId === versionSessionId ? Object.assign({}, v, patch) : v;
+    });
+    this.setTree(sessionId, versions, entry.updatedAt || Date.now());
+  },
+
   async load(sessionId) {
     if (!sessionId) return;
     const g = realGlobal();
@@ -1315,6 +1332,7 @@ return {
       const worldRef = React.useRef(null);
       const cardEls = React.useRef(new Map());
       const edgeEls = React.useRef(new Map());
+      const groupNameEls = React.useRef(new Map());
       const renameErrorState = React.useState(null);
       const renameError = renameErrorState[0];
       const setRenameError = renameErrorState[1];
@@ -1391,6 +1409,34 @@ return {
         const el = worldRef.current;
         const view = viewRef.current;
         if (el) el.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.scale + ')';
+        positionGroupNames();
+      }
+
+      /**
+       * Keep every group name inside the visible band of its own frame.
+       *
+       * A group can be thousands of world units tall (one branch of a long
+       * conversation is a long chain), so a name pinned to the frame's top edge
+       * scrolls away exactly when the reader is looking at the middle of the
+       * branch. The name is clamped to the visible part instead, the way a
+       * sticky header behaves.
+       */
+      function positionGroupNames() {
+        const graphEl = graphRef.current;
+        const view = viewRef.current;
+        if (!graphEl || graphEl.clientHeight === 0) return;
+        const visibleTop = (-view.y) / view.scale;
+        const visibleBottom = visibleTop + graphEl.clientHeight / view.scale;
+        groupNameEls.current.forEach(function (entry) {
+          const el = entry.el;
+          if (!el) return;
+          const nameHeight = (el.offsetHeight || 20) / view.scale;
+          const minTop = 6;
+          const maxTop = Math.max(minTop, entry.height - nameHeight - 6);
+          const wanted = Math.max(visibleTop + 8, entry.top + minTop) - entry.top;
+          const clamped = Math.max(minTop, Math.min(Math.min(wanted, visibleBottom - nameHeight - 8 - entry.top), maxTop));
+          el.style.top = clamped + 'px';
+        });
       }
 
       function renderFrame() {
@@ -1553,7 +1599,17 @@ return {
         setMenu(null);
         setRenameError(null);
         mutate({ action: action, sessionId: n.sessionId })
-          .then(function () { treeStore.load(sessionId); })
+          .then(function (result) {
+            // The host answers with the membership it settled on, so the menu
+            // flips immediately. It is re-asserted after the refetch as well:
+            // the read is authoritative for everything else, but it must not be
+            // able to walk back the move we were just told succeeded.
+            const archived = !(result && result.inMainChat === true);
+            treeStore.patchVersion(sessionId, n.sessionId, { archived: archived });
+            return treeStore.load(sessionId).then(function () {
+              treeStore.patchVersion(sessionId, n.sessionId, { archived: archived });
+            });
+          })
           .catch(function (error) {
             const message = error && error.message ? error.message : String(error);
             setRenameError(t('moveFailed', { message: message }));
@@ -1631,6 +1687,11 @@ return {
         };
       }, [menu === null]);
 
+      // Group names follow the view: panning, zooming and refits all move them.
+      React.useEffect(function () {
+        positionGroupNames();
+      });
+
       function onPointerDown(ev) {
         if (ev.button !== 0) return;
         const cardEl = ev.target.closest ? ev.target.closest('.mtx-card') : null;
@@ -1694,7 +1755,13 @@ return {
               key: g.key,
               className: 'mtx-group',
               style: { transform: 'translate(' + g.left + 'px,' + g.top + 'px)', width: g.width + 'px', height: g.height + 'px' },
-            }, React.createElement('span', { className: 'mtx-group-name' }, g.label));
+            }, React.createElement('span', {
+              className: 'mtx-group-name',
+              ref: function (el) {
+                if (el) groupNameEls.current.set(g.key, { el: el, top: g.top, height: g.height });
+                else groupNameEls.current.delete(g.key);
+              },
+            }, g.label));
           }),
           React.createElement('svg', { className: 'mtx-edges' },
             layout.edges.map(function (e) {
@@ -1710,7 +1777,12 @@ return {
               });
             })
           ),
-          layout.nodes.map(function (n) {
+          // Cards render from turnNodes, the version data of THIS render, and
+          // take only geometry from the layout memo. Rendering from the layout
+          // held stale node objects whenever the layout key had not changed —
+          // which is exactly what an archive flag change looks like — so a menu
+          // kept offering the move that had just been done.
+          turnNodes.map(function (n) {
             const s = springs.current.get(n.id) || layout.pos.get(n.id) || { x: 0, y: 0 };
             const summary = titles[n.sessionId];
             // A named branch reads as a group: the name belongs to the box drawn
@@ -1780,7 +1852,7 @@ return {
           // The context menu renders inside the world too, so it sits next to
           // the node it belongs to at any zoom level.
           menu === null ? null : (function () {
-            const node = layout.byId.get(menu.nodeId);
+            const node = turnNodes.find(function (n) { return n.id === menu.nodeId; });
             if (!node) return null;
             const s = springs.current.get(menu.nodeId) || layout.pos.get(menu.nodeId) || { x: 0, y: 0 };
             const inMainChat = node.archived !== true;
