@@ -5,10 +5,11 @@
 // the true rewind); ‹ 2/3 › switches between versions of the same message;
 // a Versions view draws the whole tree.
 
-// Route, CSS prefix and storage keys keep the `message-tree` spelling even
-// though the package is dsh-tree-view: Moeblack's dsh-message-edit
-// owns the `message-edit` names, and colliding would break both plugins when
-// installed together. See lib/index.js for the full note.
+// Route, CSS prefix, i18n namespace and storage keys all moved off the upstream
+// `message-tree` spelling (`/tree-view`, `dsh-tree-view:*`) so this fork and
+// dsh-plugin-message-edit can be installed together without their routes,
+// locales or persisted UI state colliding. The durable event type keeps the
+// upstream name on purpose — see the note in lib/index.js.
 const ROUTE = '/tree-view';
 const VIEW_ORDER = 16;
 
