@@ -1,8 +1,22 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 
 import { apply } from '../lib/index.js';
+import { setDemoted, setLabel, stateFilePath } from '../lib/tree-state.js';
+
+// The sidecar is read while the payload is built, so point DSH_HOME at a
+// scratch directory: a test must never read or write the real one.
+const HOME = mkdtempSync(join(tmpdir(), 'tree-view-payload-'));
+const previousHome = process.env.DSH_HOME;
+process.env.DSH_HOME = HOME;
+test.after(() => {
+  if (previousHome === undefined) delete process.env.DSH_HOME;
+  else process.env.DSH_HOME = previousHome;
+});
 
 // The tree payload is what the panel draws, so the "no phantom branch" rule is
 // asserted here: a side-chat fork (dsh-sidenote forks and archives) must not
@@ -105,6 +119,32 @@ test('an archived link with descendants survives, so chains stay connected', asy
   assert.deepEqual(response.body.versions.map((v) => v.sessionId), ['session-root', 'session-middle', 'session-leaf'],
     'the archived middle version is kept because a live branch descends from it');
   assert.equal(response.body.versions[1].archived, true, 'and it is still flagged as archived for the panel');
+});
+
+test('a version the tree put away stays on the tree, name and all', async () => {
+  const get = harness({
+    archived: ['session-branch'],
+    sessions: [
+      { id: 'session-root' },
+      { id: 'session-branch', parent: 'session-root', createdAt: 10, marker: true },
+    ],
+  });
+  // "Collect into the tree" archives the branch, exactly as a side chat does —
+  // what separates them is that we recorded the intent.
+  setDemoted(stateFilePath(HOME), 'session-branch', true);
+  setLabel(stateFilePath(HOME), 'session-branch', '方案 B');
+
+  const response = await get('session-root');
+  assert.deepEqual(response.body.versions.map((v) => v.sessionId), ['session-root', 'session-branch'],
+    'an archived version the tree demoted is still part of the tree');
+  assert.equal(response.body.versions[1].archived, true, 'and it still reports being out of the sidebar');
+  assert.equal(response.body.versions[1].label, '方案 B', 'its name survives the round trip');
+
+  // Releasing it (promote) drops the intent; nothing else changes the payload.
+  setDemoted(stateFilePath(HOME), 'session-branch', false);
+  const after = await get('session-root');
+  assert.deepEqual(after.body.versions.map((v) => v.sessionId), ['session-root'],
+    'once promoted it is an ordinary session again, and a branch only if it has descendants');
 });
 
 test('a live branch is untouched by the archived filter', async () => {

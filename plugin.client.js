@@ -503,6 +503,10 @@ function timeLabel(ms) {
 /* ---------------------------------------------------------- graph layout -- */
 
 const CARD_W = 176;
+const CARD_H = 58;
+// A group frame is a card-sized padding plus a strip for its name.
+const GROUP_PAD = 14;
+const GROUP_HEAD = 20;
 const SLOT_X = 206;
 const SLOT_Y = 132;
 
@@ -582,6 +586,9 @@ function buildTurnTree(versions, currentSessionId) {
           onCurrentPath: false,
           deleted: !!v.deleted,
           archived: !!v.archived,
+          // Every node of a named version carries the name so the group frame
+          // can wrap the whole branch, not just the node where it starts.
+          versionLabel: v.label || undefined,
         };
         nodes.push(node);
         nodeMap.set(turnNodeId, node);
@@ -628,9 +635,10 @@ function buildTurnTree(versions, currentSessionId) {
             onCurrentPath: false,
             deleted: !!v.deleted,
             archived: !!v.archived,
-            // A version's name belongs on the node where that version begins —
-            // its fork point — not on every turn the version later grows.
-            versionLabel: isForkTurn ? (v.label || undefined) : undefined,
+            // A version's name belongs to every node it owns, so the group
+            // frame wraps the whole branch: the fork point and everything it
+            // grows afterwards, but none of its own branches.
+            versionLabel: v.label || undefined,
           };
           nodes.push(node);
           nodeMap.set(turnNodeId, node);
@@ -792,13 +800,19 @@ const CSS = [
   '.mtx-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}',
   '.mtx-edge{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 45%,transparent);stroke-width:1.5}',
   '.mtx-edge[data-path]{stroke:var(--dsw-alias-accent-primary,#4b8dff);stroke-width:2}',
-  '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));box-shadow:0 2px 10px rgba(0,0,0,.14);cursor:pointer;will-change:transform;transition:box-shadow 180ms ease,border-color 180ms ease}',
+  '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));box-shadow:0 2px 10px rgba(0,0,0,.14);cursor:pointer;will-change:transform;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
   '.mtx-card:hover{box-shadow:0 6px 22px rgba(0,0,0,.24);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent)}',
   '.mtx-card[data-current]{border-color:var(--dsw-alias-accent-primary,#4b8dff);box-shadow:0 0 0 1px var(--dsw-alias-accent-primary,#4b8dff),0 6px 24px color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 30%,transparent)}',
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px rgba(0,0,0,.3);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
   '.mtx-card[data-labeled] .mtx-card-title{color:var(--dsw-alias-accent-primary,#4b8dff)}',
+  '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 7%,transparent);z-index:0;pointer-events:none}',
+  '.mtx-group-name{position:absolute;left:14px;top:-10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--dsw-alias-accent-primary,#4b8dff);background:var(--dsw-alias-bg-primary,#1e1e22);border:1px solid color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent)}',
+  '.mtx-menu{position:absolute;left:0;top:0;z-index:9;display:flex;flex-direction:column;min-width:148px;padding:4px;border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--dsw-alias-bg-primary,#1e1e22);box-shadow:0 10px 30px rgba(0,0,0,.34)}',
+  '.mtx-menu-item{appearance:none;border:0;background:transparent;text-align:left;font-family:inherit;font-size:12.5px;line-height:18px;padding:7px 10px;border-radius:8px;color:var(--dsw-alias-label-primary,#eee);cursor:pointer;white-space:nowrap}',
+  '.mtx-menu-item:hover:not([disabled]){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08))}',
+  '.mtx-menu-item[disabled]{color:var(--dsw-alias-label-tertiary,#888);cursor:not-allowed}',
   '.mtx-rename{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;z-index:7}',
   '.mtx-rename-input{width:100%;box-sizing:border-box;font-family:inherit;font-size:12.5px;line-height:17px;padding:9px 11px;border-radius:13px;border:1px solid var(--dsw-alias-accent-primary,#4b8dff);background:var(--dsw-alias-bg-primary,#1e1e22);color:var(--dsw-alias-label-primary,#eee);outline:none;box-shadow:0 6px 22px rgba(0,0,0,.28)}',
   '.mtx-rename-input::placeholder{color:var(--dsw-alias-label-tertiary,#888)}',
@@ -937,6 +951,12 @@ return {
         renameHint: 'Right-click to rename this branch',
         renameEmptyHint: 'Leave it empty to clear the name',
         renameFailed: 'Rename failed: {message}',
+        menuHint: 'Right-click for branch actions',
+        menuRename: 'Rename branch',
+        menuPromote: 'Move to main chat',
+        menuDemote: 'Collect into the tree',
+        menuDemoteOpen: 'This is the conversation you have open',
+        moveFailed: 'Move failed: {message}',
         previewUser: 'Rewrite this paragraph to be more concise.',
       },
       zh: {
@@ -977,6 +997,12 @@ return {
         renameHint: '右键重命名该分支',
         renameEmptyHint: '留空即清除名字',
         renameFailed: '重命名失败：{message}',
+        menuHint: '右键打开分支操作',
+        menuRename: '重命名分支',
+        menuPromote: '放到主对话',
+        menuDemote: '收到 Tree 里',
+        menuDemoteOpen: '这就是你当前打开的会话',
+        moveFailed: '移动失败：{message}',
         previewUser: '把这段话改写得更简洁一些。',
       },
     };
@@ -1300,6 +1326,11 @@ return {
       const renaming = renameEditorState[0];
       const setRenaming = renameEditorState[1];
       const pendingRename = React.useRef(null);
+      // Right-click opens a menu rather than jumping straight into renaming:
+      // a branch can also be moved between the main conversation and the tree.
+      const menuState = React.useState(null);
+      const menu = menuState[0];
+      const setMenu = menuState[1];
       const springs = React.useRef(new Map());
       const layoutRef = React.useRef(null);
       const viewRef = React.useRef({ x: 60, y: 42, scale: 1 });
@@ -1316,6 +1347,45 @@ return {
       }).join('|');
       const layout = React.useMemo(function () { return layoutTurnTree(turnNodes); }, [layoutKey]);
       layoutRef.current = layout;
+
+      // Named branches are drawn as groups, the way a node editor boxes a set of
+      // nodes: one rounded frame behind the branch with the name on its edge.
+      // Geometry comes from the settled layout, so a group is exactly the
+      // bounding box of the nodes that belong to that version.
+      const groupBoxes = (function () {
+        const byVersion = new Map();
+        for (const n of turnNodes) {
+          if (!n.versionLabel) continue;
+          const list = byVersion.get(n.sessionId);
+          if (list === undefined) byVersion.set(n.sessionId, [n]);
+          else list.push(n);
+        }
+        const boxes = [];
+        byVersion.forEach(function (nodes, versionId) {
+          let left = Infinity;
+          let right = -Infinity;
+          let top = Infinity;
+          let bottom = -Infinity;
+          for (const n of nodes) {
+            const pos = layout.pos.get(n.id);
+            if (!pos) continue;
+            left = Math.min(left, pos.x - CARD_W / 2);
+            right = Math.max(right, pos.x + CARD_W / 2);
+            top = Math.min(top, pos.y);
+            bottom = Math.max(bottom, pos.y + CARD_H);
+          }
+          if (!Number.isFinite(left)) return;
+          boxes.push({
+            key: 'group-' + versionId,
+            label: nodes[0].versionLabel,
+            left: left - GROUP_PAD,
+            top: top - GROUP_PAD - GROUP_HEAD,
+            width: (right - left) + GROUP_PAD * 2,
+            height: (bottom - top) + GROUP_PAD * 2 + GROUP_HEAD,
+          });
+        });
+        return boxes;
+      })();
 
       function applyView() {
         const el = worldRef.current;
@@ -1459,9 +1529,36 @@ return {
        */
       function beginRename(n) {
         if (n.deleted) return;
+        setMenu(null);
         setRenameError(null);
         pendingRename.current = { nodeId: n.id, sessionId: n.sessionId, value: n.versionLabel || '' };
         setRenaming({ ...pendingRename.current });
+      }
+
+      function beginMenu(n) {
+        if (n.deleted) return;
+        pendingRename.current = null;
+        setRenaming(null);
+        setRenameError(null);
+        setMenu({ nodeId: n.id, sessionId: n.sessionId });
+      }
+
+      /**
+       * Move a version between the main conversation and this tree. Promotion
+       * unarchives it (a sidebar session again); demotion archives it (it lives
+       * only here). Both are host-side, one call each, and both end with a
+       * reload so the sidebar state and the tree agree.
+       */
+      function moveVersion(n, action) {
+        setMenu(null);
+        setRenameError(null);
+        mutate({ action: action, sessionId: n.sessionId })
+          .then(function () { treeStore.load(sessionId); })
+          .catch(function (error) {
+            const message = error && error.message ? error.message : String(error);
+            setRenameError(t('moveFailed', { message: message }));
+            console.warn('[dsh-tree-view] ' + action + ' failed', error);
+          });
       }
 
       function commitRename() {
@@ -1517,15 +1614,34 @@ return {
         };
       }, []);
 
+      // A menu is dismissed by clicking anywhere else, by Escape, or by the
+      // panel going away (the host unmounts it).
+      React.useEffect(function () {
+        if (menu === null) return undefined;
+        const onDown = function (ev) {
+          if (ev.target && ev.target.closest && ev.target.closest('.mtx-menu')) return;
+          setMenu(null);
+        };
+        const onKey = function (ev) { if (ev.key === 'Escape') setMenu(null); };
+        document.addEventListener('pointerdown', onDown, true);
+        document.addEventListener('keydown', onKey);
+        return function () {
+          document.removeEventListener('pointerdown', onDown, true);
+          document.removeEventListener('keydown', onKey);
+        };
+      }, [menu === null]);
+
       function onPointerDown(ev) {
         if (ev.button !== 0) return;
         const cardEl = ev.target.closest ? ev.target.closest('.mtx-card') : null;
-        if (ev.target.closest && ev.target.closest('.mtx-tool,.mtx-link')) return;
+        if (ev.target.closest && ev.target.closest('.mtx-tool,.mtx-link,.mtx-rename,.mtx-menu')) return;
         if (cardEl) {
+          // A press on a node only selects it: nodes stay where the layout put
+          // them. Dragging them around was a way to lose the shape of a branch,
+          // and a tree is meant to be read, not hand-arranged.
           const id = cardEl.getAttribute('data-id');
-          const s = springs.current.get(id);
-          if (!s) return;
-          dragRef.current = { kind: 'node', id: id, moved: false, sx: ev.clientX, sy: ev.clientY, ox: s.x, oy: s.y, el: cardEl };
+          if (!springs.current.get(id)) return;
+          dragRef.current = { kind: 'node', id: id, moved: false, sx: ev.clientX, sy: ev.clientY };
         } else {
           const view = viewRef.current;
           dragRef.current = { kind: 'pan', moved: false, sx: ev.clientX, sy: ev.clientY, ox: view.x, oy: view.y };
@@ -1539,19 +1655,12 @@ return {
         if (!d) return;
         const dx = ev.clientX - d.sx;
         const dy = ev.clientY - d.sy;
-        if (!d.moved && Math.abs(dx) + Math.abs(dy) > 5) {
-          d.moved = true;
-          if (d.kind === 'node') d.el.setAttribute('data-dragging', '');
-        }
+        if (!d.moved && Math.abs(dx) + Math.abs(dy) > 5) d.moved = true;
         if (!d.moved) return;
         if (d.kind === 'pan') {
           viewRef.current.x = d.ox + dx;
           viewRef.current.y = d.oy + dy;
           applyView();
-        } else {
-          const s = springs.current.get(d.id);
-          const sc = viewRef.current.scale;
-          if (s) { s.x = d.ox + dx / sc; s.y = d.oy + dy / sc; s.vx = 0; s.vy = 0; renderFrame(); }
         }
       }
 
@@ -1560,11 +1669,7 @@ return {
         dragRef.current = null;
         if (graphRef.current) graphRef.current.removeAttribute('data-panning');
         if (!d) return;
-        if (d.kind === 'node') {
-          d.el.removeAttribute('data-dragging');
-          if (d.moved) kick();
-          else openVersion(d.id);
-        }
+        if (d.kind === 'node' && !d.moved) openVersion(d.id);
       }
 
       function cardTitle(n) {
@@ -1584,6 +1689,13 @@ return {
         onPointerCancel: onPointerUp,
       },
         React.createElement('div', { className: 'mtx-world', ref: worldRef },
+          groupBoxes.map(function (g) {
+            return React.createElement('div', {
+              key: g.key,
+              className: 'mtx-group',
+              style: { transform: 'translate(' + g.left + 'px,' + g.top + 'px)', width: g.width + 'px', height: g.height + 'px' },
+            }, React.createElement('span', { className: 'mtx-group-name' }, g.label));
+          }),
           React.createElement('svg', { className: 'mtx-edges' },
             layout.edges.map(function (e) {
               const key = e.from + '>' + e.to;
@@ -1601,12 +1713,10 @@ return {
           layout.nodes.map(function (n) {
             const s = springs.current.get(n.id) || layout.pos.get(n.id) || { x: 0, y: 0 };
             const summary = titles[n.sessionId];
-            // A named branch shows that name as its title, and demotes the
-            // derived "edited turn 3" text into the sub line where it stays
-            // readable instead of being lost.
-            const derivedTitle = cardTitle(n);
-            const sub = (n.versionLabel ? derivedTitle + ' · ' : '')
-              + (n.archived ? t('archivedTag') + ' · ' : '')
+            // A named branch reads as a group: the name belongs to the box drawn
+            // around the branch, and the node keeps saying what it is ("edited
+            // turn 3"), so neither piece of information displaces the other.
+            const sub = (n.archived ? t('archivedTag') + ' · ' : '')
               + (n.text ? '“' + clip(n.text, 44) + '” · ' : '')
               + (n.isRoot && !n.text && summary && summary.displayTitle ? clip(summary.displayTitle, 24) + ' · ' : '')
               + timeLabel(n.time);
@@ -1618,12 +1728,11 @@ return {
               'data-path': n.onCurrentPath || undefined,
               'data-deleted': n.deleted || undefined,
               'data-archived': n.archived || undefined,
-              'data-labeled': n.versionLabel ? '' : undefined,
-              title: n.deleted ? undefined : t('renameHint'),
+              title: n.deleted ? undefined : t('menuHint'),
               onContextMenu: function (ev) {
                 ev.preventDefault();
                 ev.stopPropagation();
-                beginRename(n);
+                beginMenu(n);
               },
               style: { transform: 'translate(' + (s.x - CARD_W / 2) + 'px,' + s.y + 'px)' },
               ref: function (el) { if (el) cardEls.current.set(n.id, el); else cardEls.current.delete(n.id); },
@@ -1631,7 +1740,7 @@ return {
               React.createElement('span', { className: 'mtx-card-icon' },
                 n.deleted ? '∅' : n.isRoot ? '●' : (n.operation === 'retry' ? '↻' : (n.operation === 'edit' ? '✎' : '💬'))),
               React.createElement('span', { className: 'mtx-card-main' },
-                React.createElement('span', { className: 'mtx-card-title' }, n.versionLabel || derivedTitle),
+                React.createElement('span', { className: 'mtx-card-title' }, cardTitle(n)),
                 React.createElement('span', { className: 'mtx-card-sub' }, sub)
               )
             );
@@ -1665,6 +1774,54 @@ return {
                 onPointerDown: function (ev) { ev.stopPropagation(); },
                 onClick: function (ev) { ev.stopPropagation(); },
                 onContextMenu: function (ev) { ev.preventDefault(); ev.stopPropagation(); },
+              })
+            );
+          })(),
+          // The context menu renders inside the world too, so it sits next to
+          // the node it belongs to at any zoom level.
+          menu === null ? null : (function () {
+            const node = layout.byId.get(menu.nodeId);
+            if (!node) return null;
+            const s = springs.current.get(menu.nodeId) || layout.pos.get(menu.nodeId) || { x: 0, y: 0 };
+            const inMainChat = node.archived !== true;
+            const isOpenSession = node.sessionId === sessionId;
+            const items = [{
+              key: 'rename',
+              label: t('menuRename'),
+              hint: null,
+              disabled: false,
+              run: function () { beginRename(node); },
+            }];
+            items.push(inMainChat ? {
+              key: 'demote',
+              label: t('menuDemote'),
+              // Archiving the session that is currently open would put the app
+              // in a state it cannot navigate out of, so the open one stays.
+              hint: isOpenSession ? t('menuDemoteOpen') : null,
+              disabled: isOpenSession,
+              run: function () { moveVersion(node, 'demote'); },
+            } : {
+              key: 'promote',
+              label: t('menuPromote'),
+              hint: null,
+              disabled: false,
+              run: function () { moveVersion(node, 'promote'); },
+            });
+            return React.createElement('div', {
+              className: 'mtx-menu',
+              key: 'context-menu',
+              style: { transform: 'translate(' + (s.x + CARD_W / 2 + 6) + 'px,' + s.y + 'px)' },
+              onPointerDown: function (ev) { ev.stopPropagation(); },
+            },
+              items.map(function (item) {
+                return React.createElement('button', {
+                  key: item.key,
+                  type: 'button',
+                  className: 'mtx-menu-item',
+                  disabled: item.disabled || undefined,
+                  title: item.hint || undefined,
+                  onClick: function (ev) { ev.stopPropagation(); item.run(); },
+                }, item.label);
               })
             );
           })()
