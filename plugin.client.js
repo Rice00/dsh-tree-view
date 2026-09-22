@@ -1077,11 +1077,17 @@ const CSS = [
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px rgba(0,0,0,.3);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
-  // The folded shared history: dashed and quieter than a turn, because it is not
-  // a decision point — it is the stretch every branch has in common.
-  '.mtx-card[data-fold]{border-style:dashed;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 6%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)))}',
-  '.mtx-card[data-fold] .mtx-card-title{color:var(--dsw-alias-label-secondary,#bbb)}',
-  '.mtx-card[data-fold]:hover{border-style:solid}',
+  // A folded stretch is not a turn, and it must not read like one: a narrower
+  // pill with a striped texture standing for the turns inside it, one line of
+  // text, and a chevron saying that it opens. The current-path ring carries over
+  // as an accent-tinted dashed border instead of fighting it.
+  '.mtx-card[data-fold]{width:176px;padding:8px 12px;border-radius:999px;border:1px dashed color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);background:repeating-linear-gradient(90deg,color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 20%,transparent) 0 1px,transparent 1px 6px),color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 9%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));box-shadow:none;align-items:center;justify-content:center;gap:6px}',
+  '.mtx-card[data-fold]:hover{border-style:solid;box-shadow:0 6px 20px rgba(0,0,0,.22)}',
+  '.mtx-card[data-fold] .mtx-card-icon{width:auto;height:auto;background:transparent;color:var(--dsw-alias-label-secondary,#bbb);font-size:13px;letter-spacing:.1em}',
+  '.mtx-card[data-fold] .mtx-card-title{font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary,#bbb);font-weight:600}',
+  '.mtx-card[data-fold][data-current]{border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 65%,transparent)}',
+  '.mtx-card[data-fold][data-current] .mtx-card-title,.mtx-card[data-fold][data-current] .mtx-card-icon{color:var(--dsw-alias-accent-primary,#4b8dff)}',
+  '.mtx-fold-cue{flex:none;font-size:12px;line-height:1;color:color-mix(in srgb,var(--dsw-alias-label-secondary,#bbb) 80%,transparent)}',
   '.mtx-card[data-labeled] .mtx-card-title{color:var(--dsw-alias-accent-primary,#4b8dff)}',
   '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 7%,transparent);z-index:0;pointer-events:none}',
   '.mtx-group-name{position:absolute;left:14px;top:-10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--dsw-alias-accent-primary,#4b8dff);background:var(--dsw-alias-bg-primary,#1e1e22);border:1px solid color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent)}',
@@ -2290,8 +2296,7 @@ return {
             // A named branch reads as a group: the name belongs to the box drawn
             // around the branch, and the node keeps saying what it is ("edited
             // turn 3"), so neither piece of information displaces the other.
-            const sub = n.fold ? t('foldExpandHint')
-              : (n.running ? t('runningTag') + ' · ' : '')
+            const sub = (n.running ? t('runningTag') + ' · ' : '')
               + (n.copy ? t('forkedAt', { turn: n.turn }) + ' · ' : '')
               + (n.archived ? t('archivedTag') + ' · ' : '')
               + (n.text ? '“' + clip(n.text, 44) + '” · ' : '')
@@ -2325,8 +2330,12 @@ return {
                 n.fold ? '⋯' : n.deleted ? '∅' : n.isRoot ? '●' : (n.operation === 'retry' ? '↻' : (n.operation === 'edit' ? '✎' : '💬'))),
               React.createElement('span', { className: 'mtx-card-main' },
                 React.createElement('span', { className: 'mtx-card-title' }, cardTitle(n)),
-                React.createElement('span', { className: 'mtx-card-sub' }, sub)
-              )
+                // A folded stretch is one line by design: the turns it hides are
+                // not there to be described, and the pill says "click me" by
+                // shape. Every other node keeps its subtitle.
+                n.fold ? null : React.createElement('span', { className: 'mtx-card-sub' }, sub)
+              ),
+              n.fold ? React.createElement('span', { className: 'mtx-fold-cue' }, '⌄') : null
             );
           }),
           // The rename editor renders inside the world so it inherits the same
