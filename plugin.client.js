@@ -154,6 +154,10 @@ const PREFS_DEFAULTS = {
   rememberPath: true,
   // Cancel a still-running turn before an edit forks the conversation.
   stopOnEdit: true,
+  // Hide forks that copied the conversation and never added a turn of their own.
+  // On by default, because a photocopy drawn as a branch doubles the canvas; the
+  // switch in the Tree panel is there for when you want to see them anyway.
+  dropEmptyForks: true,
 };
 
 const prefsStore = {
@@ -530,14 +534,24 @@ const SLOT_Y = 132;
 /**
  * Project conversation family versions into a turn-level branching tree.
  */
-function buildTurnTree(versions, currentSessionId) {
+function buildTurnTree(versions, currentSessionId, options) {
   if (!versions || versions.length === 0) return [];
-  const byId = new Map(versions.map(function (v) { return [v.sessionId, v]; }));
+  const dropEmptyForks = !options || options.dropEmptyForks !== false;
+  const kept = versions.filter(function (v) {
+    // A fork that copied the history and never added a turn of its own is a
+    // photocopy. It doubles the canvas and makes the real history look like it
+    // forked twice, so it is hidden — unless the user collected it into the
+    // tree, or switched the filter off to look at everything.
+    if (!dropEmptyForks) return true;
+    return v.copy !== true || v.collected === true;
+  });
+  if (kept.length === 0) return [];
+  const byId = new Map(kept.map(function (v) { return [v.sessionId, v]; }));
 
-  let rootVersion = versions.find(function (v) { return !v.parentSessionId; });
+  let rootVersion = kept.find(function (v) { return !v.parentSessionId; });
   if (!rootVersion) {
-    const rootId = rootOf(versions, currentSessionId) || (versions[0] && versions[0].sessionId);
-    rootVersion = (rootId && byId.get(rootId)) || versions[0];
+    const rootId = rootOf(kept, currentSessionId) || (kept[0] && kept[0].sessionId);
+    rootVersion = (rootId && byId.get(rootId)) || kept[0];
   }
   const rootSessionId = rootVersion.sessionId;
 
@@ -581,16 +595,16 @@ function buildTurnTree(versions, currentSessionId) {
     // turn. Hanging it off the root instead is what made a copy look like a
     // second conversation sprouting from the original.
     const isFork = typeof v.targetTurn !== 'number' && typeof v.forkTurn === 'number';
-    const firstOwnTurn = isFork ? v.forkTurn + 1 : v.targetTurn;
+    const firstOwnTurn = isFork ? v.forkTurn + 1 : (typeof v.targetTurn === 'number' ? v.targetTurn : 1);
     if (turn === firstOwnTurn) {
-      const attachTurn = isFork ? v.forkTurn : v.targetTurn - 1;
+      const attachTurn = isFork ? v.forkTurn : firstOwnTurn - 1;
       return attachTurn <= 0 ? rootNodeId : v.parentSessionId + '#t' + attachTurn;
     }
     return v.sessionId + '#t' + (turn - 1);
   }
 
-  for (let i = 0; i < versions.length; i++) {
-    const v = versions[i];
+  for (let i = 0; i < kept.length; i++) {
+    const v = kept[i];
     const isCurrentSession = v.sessionId === currentSessionId;
     const turns = Array.isArray(v.turns) && v.turns.length > 0 ? v.turns : [];
 
@@ -876,6 +890,7 @@ const CSS = [
   '.mtx-graph-tools{position:absolute;top:12px;right:14px;display:flex;gap:6px;z-index:4}',
   '.mtx-tool{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:var(--dsw-alias-bg-primary,rgba(30,30,34,.85));color:var(--dsw-alias-label-secondary,#bbb);cursor:pointer;font-size:14px}',
   '.mtx-tool:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
+  '.mtx-tool[data-on]{color:var(--dsw-alias-accent-primary,#4b8dff);border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 55%,transparent);background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 14%,transparent)}',
   '.mtx-empty{position:absolute;left:0;right:0;bottom:26px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;pointer-events:none}',
   '.mtx-graph .mtx-link{position:absolute;right:14px;bottom:10px;font-size:12px;color:var(--dsw-alias-label-tertiary);text-decoration:none;z-index:4}',
   '.mtx-link:hover{color:var(--dsw-alias-label-primary)}',
@@ -1005,6 +1020,8 @@ return {
         menuHint: 'Right-click for branch actions',
         copyBranch: 'Forked copy',
         forkedAt: 'forked at turn {turn}',
+        dropForksLabel: 'Hide forks with no new content',
+        dropForksHint: 'On: a fork that only copied this conversation is kept out of the tree. Off: every fork is drawn, each one hanging off the turn it forked from.',
         menuRename: 'Rename branch',
         menuPromote: 'Move to main chat',
         menuDemote: 'Collect into the tree',
@@ -1053,6 +1070,8 @@ return {
         menuHint: '右键打开分支操作',
         copyBranch: '分叉副本',
         forkedAt: '分叉于第 {turn} 轮',
+        dropForksLabel: '剔除无新内容的 Fork',
+        dropForksHint: '开：只整份复制了本对话、自己没聊出任何一轮的 Fork 不进树。关：所有 Fork 都画出来，各自挂在自己分叉的那一轮上。',
         menuRename: '重命名分支',
         menuPromote: '放到主对话',
         menuDemote: '收到 Tree 里',
@@ -1365,6 +1384,7 @@ return {
       const tree = useTree(sessionId);
       const titles = useSessionList().byId;
       const versions = (tree && tree.versions) || [];
+      const prefs = usePrefs();
 
       const graphRef = React.useRef(null);
       const worldRef = React.useRef(null);
@@ -1395,8 +1415,8 @@ return {
       const fittedRef = React.useRef(false);
 
       const turnNodes = React.useMemo(function () {
-        return buildTurnTree(versions, sessionId);
-      }, [versions, sessionId]);
+        return buildTurnTree(versions, sessionId, { dropEmptyForks: prefs.dropEmptyForks });
+      }, [versions, sessionId, prefs.dropEmptyForks]);
 
       const layoutKey = turnNodes.map(function (n) {
         return n.id + ':' + (n.parentId || '') + ':' + (n.onCurrentPath ? 1 : 0);
@@ -1939,6 +1959,17 @@ return {
           })()
         ),
         React.createElement('div', { className: 'mtx-graph-tools' },
+          // The filter is a switch and not a hidden default: whether a fork that
+          // copied the conversation and added nothing belongs on the canvas is
+          // the reader's call, not ours.
+          React.createElement('button', {
+            type: 'button',
+            className: 'mtx-tool',
+            'data-on': prefs.dropEmptyForks ? '' : undefined,
+            'aria-pressed': prefs.dropEmptyForks ? 'true' : 'false',
+            title: t('dropForksLabel') + ' — ' + t('dropForksHint'),
+            onClick: function () { prefsStore.set({ dropEmptyForks: !prefs.dropEmptyForks }); },
+          }, '⧉'),
           React.createElement('button', {
             type: 'button', className: 'mtx-tool', title: t('fit'),
             onClick: function () { fitView(); },
