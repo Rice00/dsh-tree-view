@@ -8,12 +8,17 @@ import React, { act } from 'react';
 const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
 
 // One family (root + an edited branch) and a second conversation that is not
-// part of it. The reported bug: with dsh-tree-view(1) — the branch — open in
-// the Tree tab, clicking dsh-tree-view in the sidebar landed on the root for a
-// moment and then snapped back to the branch. The remember-the-branch restore
-// cannot tell "the app dropped me on the family root" from "I asked for the
-// root", and re-firing it once per page load is why it only showed up the first
-// time after a restart.
+// part of it. Reported twice, in two shapes:
+//
+//   1. with dsh-tree-view(1) — the branch — open in its Tree tab, clicking
+//      dsh-tree-view in the sidebar landed on the root for a flash and then
+//      snapped straight back to the branch;
+//   2. after that, sending a message in the root jumped to the branch's Tree
+//      tab again — the same restore, this time with its `sessions.open` parked
+//      in a session-list subscription that only fired when the list changed.
+//
+// Both come from the restore that remembers which branch was open: it cannot
+// tell "the app put me back where I was" from "I asked for this conversation".
 const VERSIONS = [
   {
     sessionId: 'session-root',
@@ -41,7 +46,8 @@ const PATH_KEY = 'dsh-tree-view:active-path';
 /**
  * Boot the shipped bundle and render the user bubble the host asks for, which
  * is where the restore lives. `opened` collects every navigation the plugin
- * performs on its own.
+ * performs on its own; the session list is mutable so a test can make a branch
+ * appear only after the fact, the way unarchiving does.
  */
 async function mountChat(t, options = {}) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
@@ -52,7 +58,27 @@ async function mountChat(t, options = {}) {
   if (options.remembered) {
     dom.window.localStorage.setItem(PATH_KEY, JSON.stringify({ 'session-root': options.remembered }));
   }
-  dom.window.fetch = async () => ({ ok: true, json: async () => ({ versions: VERSIONS }) });
+  const versions = VERSIONS.map((v) => (options.archiveBranch && v.sessionId === 'session-branch'
+    ? Object.assign({}, v, { archived: true })
+    : v));
+  const posts = [];
+  dom.window.fetch = async (url, init) => {
+    if (init && init.method === 'POST') posts.push({ url, body: init.body });
+    return { ok: true, json: async () => ({ versions }) };
+  };
+
+  const byId = {};
+  for (const v of versions) {
+    if (!options.listed || options.listed.includes(v.sessionId)) byId[v.sessionId] = { id: v.sessionId };
+  }
+  const subscribers = [];
+  const list = {
+    subscribe(fn) {
+      subscribers.push(fn);
+      return () => { const at = subscribers.indexOf(fn); if (at !== -1) subscribers.splice(at, 1); };
+    },
+    getSnapshot() { return { byId }; },
+  };
 
   const previous = new Map();
   const browserErrors = [];
@@ -96,15 +122,7 @@ async function mountChat(t, options = {}) {
   plugin.apply({
     get(name) {
       if (name === 'slots') return slots;
-      if (name === 'sessions') {
-        return {
-          open: (sessionId) => { opened.push(sessionId); },
-          list: {
-            subscribe: () => () => {},
-            getSnapshot: () => ({ byId: Object.fromEntries(VERSIONS.map((v) => [v.sessionId, { id: v.sessionId }])) }),
-          },
-        };
-      }
+      if (name === 'sessions') return { open: (sessionId) => { opened.push(sessionId); }, list };
       return undefined;
     },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
@@ -119,7 +137,12 @@ async function mountChat(t, options = {}) {
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
   };
-  return { dom, opened, render };
+  const sessionAppears = async (sessionId) => {
+    byId[sessionId] = { id: sessionId };
+    await act(async () => { for (const fn of [...subscribers]) fn(); });
+    await act(async () => { await Promise.resolve(); });
+  };
+  return { dom, opened, posts, render, sessionAppears };
 }
 
 test('clicking the family root while its branch is open does not snap back', async (t) => {
@@ -133,6 +156,38 @@ test('clicking the family root while its branch is open does not snap back', asy
     'the click on dsh-tree-view must stay on dsh-tree-view, not chase dsh-tree-view(1)');
 });
 
+test('a page-load landing on the root leaves you where the app put you', async (t) => {
+  const chat = await mountChat(t, { remembered: 'session-branch' });
+
+  await chat.render('session-root');
+  assert.deepEqual(chat.opened, [],
+    'being put back on a conversation after a reload is not a reason to navigate away from it');
+});
+
+test('a branch the sidebar does not list is never chased later', async (t) => {
+  // The late jump: the restore used to hand `sessions.open` to a session-list
+  // subscription, so it fired whenever the list next changed — which is what
+  // sent a half-typed message to the other branch's Tree tab.
+  const chat = await mountChat(t, { remembered: 'session-branch', listed: ['session-root', 'session-other'] });
+
+  await chat.render('session-other');
+  await chat.render('session-root');
+  assert.deepEqual(chat.opened, [], 'a branch that is not in the sidebar is not opened');
+
+  await chat.sessionAppears('session-branch');
+  assert.deepEqual(chat.opened, [], 'and it is not opened later, when the list happens to change');
+});
+
+test('an archived branch is not unarchived behind your back', async (t) => {
+  const chat = await mountChat(t, { remembered: 'session-branch', archiveBranch: true });
+
+  await chat.render('session-other');
+  await chat.render('session-root');
+  assert.deepEqual(chat.opened, [],
+    'an archived branch is not opened, because opening it would mean unarchiving it first');
+  assert.deepEqual(chat.posts, [], 'and nothing was asked of the host to make that possible');
+});
+
 test('reopening the family from elsewhere still returns to the branch', async (t) => {
   const chat = await mountChat(t, { remembered: 'session-branch' });
 
@@ -144,12 +199,14 @@ test('reopening the family from elsewhere still returns to the branch', async (t
     'the branch you last had open is what a fresh landing on the family restores');
 });
 
-test('a cold landing on the family root restores the branch, once', async (t) => {
+test('the restore does not fire twice in one page load', async (t) => {
   const chat = await mountChat(t, { remembered: 'session-branch' });
 
+  await chat.render('session-other');
   await chat.render('session-root');
-  assert.deepEqual(chat.opened, ['session-branch'], 'the restore still fires on first landing');
+  assert.deepEqual(chat.opened, ['session-branch'], 'the restore fires once');
 
+  await chat.render('session-other');
   await chat.render('session-root');
-  assert.deepEqual(chat.opened, ['session-branch'], 'and it does not fire twice');
+  assert.deepEqual(chat.opened, ['session-branch'], 'and not again on the next visit');
 });

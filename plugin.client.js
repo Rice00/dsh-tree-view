@@ -1318,8 +1318,10 @@ return {
         // On the root. Don't record while a restore we triggered is still in
         // flight, or we would overwrite the target with the root we are leaving.
         if (pendingRestore.has(root)) return;
-        const remembered = activePathStore.get(root);
-        if (!remembered || remembered === root) return;
+        // The first session of a page load is the app putting you back where
+        // you already were, not you reopening a conversation. Navigating away
+        // from it on load is the surprise all of these guards exist to avoid.
+        if (arrivedFrom === undefined) return;
         if (restoredFamilies.has(root)) {
           // Already restored once this page load and the user walked back to
           // the root deliberately — honour that as the new selection.
@@ -1330,18 +1332,31 @@ return {
         // the sidebar entry points at the root, and that entry is how a branch
         // is left. Chasing the remembered branch here is what made a click on
         // the family's conversation land and then snap straight back to the
-        // branch it was opened from — and since the restore latches once per
-        // page load, it only ever showed up on the first click after a restart.
-        if (arrivedFrom !== undefined && arrivedFrom !== root
-          && rootOf(versions, arrivedFrom) === root) {
+        // branch it was opened from.
+        if (arrivedFrom !== root && rootOf(versions, arrivedFrom) === root) {
           restoredFamilies.add(root);
           activePathStore.set(root, root);
           return;
         }
+        const remembered = activePathStore.get(root);
+        if (!remembered || remembered === root) return;
         // Never chase a branch that no longer exists (a deleted branch may
-        // still appear here as a non-openable ghost).
+        // still appear here as a non-openable ghost) or one that has been put
+        // away — unarchiving is something the user asks for by clicking a
+        // version, never something a restore does behind their back.
         const target = versions.find(function (v) { return v.sessionId === remembered; });
-        if (!target || target.deleted) return;
+        if (!target || target.deleted || target.archived) return;
+        // Only open something the sidebar already lists. A session that still
+        // has to appear would leave `openWhenListed` holding a subscription,
+        // and that subscription fires on the next session-list change — which
+        // is how a restore used to land minutes late, in the middle of typing.
+        const byId = sessions && sessions.list && typeof sessions.list.getSnapshot === 'function'
+          ? sessions.list.getSnapshot().byId
+          : null;
+        if (!byId || byId[target.sessionId] === undefined) {
+          restoredFamilies.add(root);
+          return;
+        }
         restoredFamilies.add(root);
         pendingRestore.add(root);
         openVersionTarget(sessions, target);
