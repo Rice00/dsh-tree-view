@@ -3,20 +3,41 @@
 English | [简体中文](README.md)
 
 [![npm](https://img.shields.io/npm/v/dsh-tree-view?color=cb3837&logo=npm)](https://www.npmjs.com/package/dsh-tree-view)
-[![CI](https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml)
+[![CI](https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![dsh](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff)](https://github.com/deepseek-ai/deepseek-harness)
-[![stars](https://img.shields.io/github/stars/SpookySandwich/dsh-tree-view?style=flat&label=stars)](https://github.com/Rice00/dsh-tree-view/stargazers)
 
-Edit a message you already sent and the conversation **rewinds and branches** from that point, the way ChatGPT, Claude and DeepSeek all do it. The old version is not overwritten — a `‹ 2/4 ›` counter appears under the bubble, and a Versions tab draws the whole tree.
+> A **fork** of [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit) (MIT © SpookySandwich): the goal is to turn conversation branching from scattered sessions into **one tree, one sidebar entry**. The upstream branching engine, the tree UI and its test suite are all kept.
 
-![demo](https://raw.githubusercontent.com/SpookySandwich/dsh-tree-view/master/assets/demo.gif)
+Edit a message you already sent and the conversation **rewinds and branches** from that point, the way ChatGPT, Claude and DeepSeek all do it. The old version is not overwritten — a `‹ 2/4 ›` counter appears under the bubble, and the Tree tab draws the whole tree.
+
+## What this fork adds
+
+| Goal | State |
+| --- | --- |
+| **Rename a branch** from the tree (the sidebar title stays host-owned) | done |
+| Right-click **Move to main chat** / **Collect into the tree** | done |
+| **Collect every other branch** in one click | done |
+| **Hide content-less forks** switch (forks that only copied the conversation) | done |
+| **Shared turns merged**: a fork's copied turns are the same nodes as its parent's | done |
+| **Capability probe + archive adapter** (degrade loudly, never silently) | done |
+| View controls for large families (collapse a branch, last N turns) | open |
+
+![demo](https://raw.githubusercontent.com/Rice00/dsh-tree-view/main/assets/demo.gif)
 
 ## Version Tree Visualization
 
-No matter how deeply conversations diverge or how many times prompts are edited, the **Versions** tab projects a clear, turn-level branching hierarchy with real-time active path highlights and instant navigation:
+No matter how deeply conversations diverge or how many times prompts are edited, the **Tree** tab projects a clear, turn-level branching hierarchy with real-time active path highlights and instant navigation:
 
-![Version Tree](https://raw.githubusercontent.com/SpookySandwich/dsh-tree-view/master/assets/tree-demo.png)
+![Version Tree](https://raw.githubusercontent.com/Rice00/dsh-tree-view/main/assets/tree-demo.png)
+
+## Living with host versions
+
+Hiding and showing sessions goes through `ctx.workspaceRegistry`: archiving is the supported `archiveSession`, unarchiving has to write the registry's own state (this build exposes **no unarchive API**). That coupling lives in exactly one file, `lib/archive-adapter.js`, which is probed once at load:
+
+- A host upgrade that removes part of the seam is **not silent**: the boot log gets one `archive support is incomplete … missing: …` line, the panel says so in place, and the affected controls (collect, move to main chat) are disabled with the reason on hover. Everything else keeps working.
+- A host that cannot read the archive set is **never guessed at**: nothing gets archived on a claim that "nothing is hidden".
+- `package.json` still declares the verified range in `engines.dsh` (`>=0.1.5-rc.2 <0.1.6-0`), but the real guard is the probe: a version tells you the host changed, a probe tells you **what** changed.
 
 ## What it does
 

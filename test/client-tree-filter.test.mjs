@@ -182,6 +182,29 @@ test('the toolbar says what it does in a line, and asks before stopping work', a
   assert.equal(view.confirmTitle(), null, 'and the question goes away');
 });
 
+test('a host that cannot hide sessions turns those controls off and says so', async (t) => {
+  const degraded = {
+    versions: VERSIONS,
+    archiveSupport: { ok: false, read: true, hide: false, show: false, missing: ['workspaceRegistry.archiveSession'] },
+  };
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, async () => ({
+    ok: true,
+    json: async () => degraded,
+  }));
+
+  const collect = view.tools()[1];
+  assert.equal(collect.disabled, true, 'collect is off rather than failing at click time');
+  assert.ok((collect.getAttribute('title') || '').length > 0, 'and it says why on hover');
+
+  const notice = view.dom.window.document.querySelector('.mtx-notice');
+  assert.ok(notice, 'the panel states the degradation once, in place');
+  assert.ok(notice.textContent.includes('workspaceRegistry.archiveSession'),
+    'naming the missing piece: ' + notice.textContent);
+
+  // Filtering has nothing to do with the archive seam and must stay usable.
+  assert.equal(view.tools()[0].disabled, false, 'the filter still works');
+});
+
 test('a gap in the turn numbering does not orphan the chain', async (t) => {
   const shown = await mountView(t, { dropEmptyForks: true }, GAPPED_VERSIONS);
   const links = shown.links();

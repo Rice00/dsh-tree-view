@@ -56,20 +56,30 @@ function harness(options) {
   }
 
   let route;
+  const archiveMode = options.archive ?? 'full';
   const archivedIds = [...archived];
   const running = new Set(options.running ?? []);
   const stopped = [];
+  // The archive seam as a host may hand it over: complete, without the archive
+  // call, without our state write path, or absent entirely.
+  const registry = archiveMode === 'none' ? undefined : {
+    archivedSessionIds: archivedIds,
+    ...archiveMode === 'no-archive' ? {} : {
+      async archiveSession(id) { if (!archivedIds.includes(id)) archivedIds.push(id); },
+    },
+    ...archiveMode === 'no-state' ? {} : {
+      async enqueueOperation(job) { return job(); },
+      requireState() { return { archivedSessionIds: [...archivedIds] }; },
+      async setState(next) { archivedIds.splice(0, archivedIds.length, ...next.archivedSessionIds); },
+    },
+    list: () => [{ sessionIds: [...records.keys()], attachSession: async () => {} }],
+  };
   const ctx = {
-    get(name) { return this[name]; },
+    get(name) { return name === 'workspaceRegistry' ? registry : this[name]; },
     effect(fn) { fn(); },
     webServer: { register(spec) { route = spec.handler; return () => {}; } },
     sessions: { get: (id) => records.get(id)?.session, flush: async () => {} },
     sessionPersistence: {},
-    workspaceRegistry: {
-      archivedSessionIds: archivedIds,
-      async archiveSession(id) { if (!archivedIds.includes(id)) archivedIds.push(id); },
-      list: () => [{ sessionIds: [...records.keys()], attachSession: async () => {} }],
-    },
     sessionQuery: {
       listSessions: async () => [...records.values()].map(({ session }) => ({ header: session.header })),
       readSession: async (id) => {
@@ -214,6 +224,56 @@ test('collecting the others never touches the conversation being viewed', async 
   assert.deepEqual(response.body.collected, ['session-branch']);
   assert.ok(!get.archivedIds.includes('session-root'), 'the open conversation is never archived');
   assert.deepEqual(response.body.stopped, [], 'and nothing needed stopping');
+});
+
+test('the payload states what the host can do about hiding sessions', async () => {
+  const full = harness({ archived: [], sessions: [{ id: 'session-root' }] });
+  const fullPayload = await full('session-root');
+  assert.deepEqual(fullPayload.body.archiveSupport, { ok: true, read: true, hide: true, show: true, missing: [] });
+
+  const noArchive = harness({ archived: [], archive: 'no-archive', sessions: [{ id: 'session-root' }] });
+  const degraded = await noArchive('session-root');
+  assert.equal(degraded.body.archiveSupport.hide, false);
+  assert.deepEqual(degraded.body.archiveSupport.missing, ['workspaceRegistry.archiveSession'],
+    'the payload names the missing piece, so the panel can say which control is off');
+
+  const none = harness({ archived: [], archive: 'none', sessions: [{ id: 'session-root' }] });
+  assert.deepEqual((await none('session-root')).body.archiveSupport.missing, ['workspaceRegistry']);
+});
+
+test('a host that cannot archive refuses the move with a code, not a stack', async () => {
+  const get = harness({
+    archived: [],
+    archive: 'no-archive',
+    sessions: [
+      { id: 'session-root', forkTurns: 0, ownTurns: 14 },
+      { id: 'session-branch', parent: 'session-root', createdAt: 10, marker: true },
+    ],
+  });
+  const demote = await get.post({ action: 'demote', sessionId: 'session-branch' });
+  assert.equal(demote.status, 409);
+  assert.equal(demote.body.code, 'archive-unavailable');
+  assert.deepEqual(get.archivedIds, [], 'and nothing was archived');
+
+  const collect = await get.post({ action: 'demoteOthers', sessionId: 'session-root' });
+  assert.equal(collect.status, 200);
+  assert.deepEqual(collect.body.collected, [], 'nothing could be collected');
+  assert.deepEqual(collect.body.failed, [{ sessionId: 'session-branch', reason: 'archive-unavailable' }],
+    'and the panel is told why, per version');
+});
+
+test('a host that cannot write registry state refuses to put a branch back', async () => {
+  const get = harness({
+    archived: ['session-branch'],
+    archive: 'no-state',
+    sessions: [
+      { id: 'session-root', forkTurns: 0, ownTurns: 14 },
+      { id: 'session-branch', parent: 'session-root', createdAt: 10, marker: true },
+    ],
+  });
+  const promote = await get.post({ action: 'promote', sessionId: 'session-branch' });
+  assert.equal(promote.status, 409);
+  assert.equal(promote.body.code, 'unarchive-unavailable');
 });
 
 test('a live branch is untouched by the archived filter', async () => {

@@ -36,6 +36,14 @@ Because DSH session event logs are append-only without native in-session branchi
   Cold logs use `observeSession(..., { projectionMode: 'none' })` and release
   the observation lease; this restores seeded sessions through the correct API.
 - Registers the `/tree-view` HTTP route on `ctx.webServer`.
+- Touches the host's workspace registry only through `lib/archive-adapter.js`,
+  which is the single place holding that coupling: the archive set
+  (`archivedSessionIds`), archiving (`archiveSession`), and unarchiving — which
+  this build leaves to plugins, so the adapter mirrors the registry's own state
+  discipline (same operation queue, same read, same write). `probe()` reports
+  what the running host supports; the payload carries it as `archiveSupport`,
+  the boot logs one line when something is missing, and the panel disables
+  exactly the controls that cannot work.
 - Owns branch creation transactions (`POST /tree-view`):
   1. Truncates parent events up to the target turn.
   2. Adds an ignorable `message-tree/version` marker to the constructor seed.

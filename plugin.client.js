@@ -255,7 +255,7 @@ const treeStore = {
     }
   },
 
-  setTree(sessionId, versions, timestamp) {
+  setTree(sessionId, versions, timestamp, archiveSupport) {
     if (!Array.isArray(versions)) versions = [];
     const rootId = rootOf(versions, sessionId) || sessionId;
     const updatedAt = typeof timestamp === 'number' ? timestamp : Date.now();
@@ -264,7 +264,16 @@ const treeStore = {
       return;
     }
 
-    const entry = { versions: versions, rootId: rootId, loading: false, error: null, updatedAt: updatedAt };
+    const entry = {
+      versions: versions,
+      rootId: rootId,
+      loading: false,
+      error: null,
+      updatedAt: updatedAt,
+      // The host's capability report travels with the payload: the panel uses
+      // it to disable what cannot work.
+      archiveSupport: archiveSupport ?? (existingRoot && existingRoot.archiveSupport) ?? null,
+    };
     this.byRoot.set(rootId, entry);
 
     for (let i = 0; i < versions.length; i++) {
@@ -316,7 +325,7 @@ const treeStore = {
         const res = await g.fetch(ROUTE + '?sessionId=' + encodeURIComponent(sessionId), { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        self.setTree(sessionId, data.versions, reqTime);
+        self.setTree(sessionId, data.versions, reqTime, data.archiveSupport);
       } catch (e) {
         const errStr = String((e && e.message) || e);
         const prev = self.bySession.get(sessionId);
@@ -325,6 +334,7 @@ const treeStore = {
           loading: false,
           error: errStr,
           updatedAt: prev ? prev.updatedAt : 0,
+          archiveSupport: prev ? prev.archiveSupport : null,
         });
         self.notify();
       } finally {
@@ -937,6 +947,7 @@ const CSS = [
   '.mtx-link:hover{color:var(--dsw-alias-label-primary)}',
   '.mtx-error{font-size:12px;color:var(--dsw-alias-status-error,#e5484d)}',
   '.mtx-graph .mtx-error{position:absolute;left:14px;top:16px;z-index:4}',
+  '.mtx-notice{position:absolute;left:14px;right:14px;bottom:34px;z-index:4;pointer-events:none;padding:7px 10px;border-radius:9px;font-size:11.5px;line-height:16px;color:var(--dsw-alias-label-secondary,#bbb);background:color-mix(in srgb,var(--dsw-alias-status-warning,#e0a03a) 14%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));border:1px solid color-mix(in srgb,var(--dsw-alias-status-warning,#e0a03a) 40%,transparent)}',
 
   // Flash highlight when a graph click lands on its message.
   '@keyframes mtx-flash-kf{0%,55%{background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 22%,transparent)}100%{background:transparent}}',
@@ -1068,6 +1079,8 @@ return {
         collectStop: 'Stop and collect',
         collectFailed: 'Collect failed: {message}',
         runningTag: 'running',
+        archiveUnavailable: 'This build cannot do that yet — see the note in the panel',
+        archivePartial: 'This DSH build is missing part of the archive interface ({parts}), so collecting and putting back branches is off. Everything else still works.',
         menuRename: 'Rename branch',
         menuPromote: 'Move to main chat',
         menuDemote: 'Collect into the tree',
@@ -1123,6 +1136,8 @@ return {
         collectStop: '中止任务并收起',
         collectFailed: '收起失败：{message}',
         runningTag: '运行中',
+        archiveUnavailable: '此 DSH 版本还不支持这个操作，面板上有说明',
+        archivePartial: '此 DSH 版本缺少归档接口的一部分（{parts}），因此「收起 / 放到主对话」已停用；树视图其余功能不受影响。',
         menuRename: '重命名分支',
         menuPromote: '放到主对话',
         menuDemote: '收到 Tree 里',
@@ -1479,6 +1494,10 @@ return {
       const titles = useSessionList().byId;
       const versions = (tree && tree.versions) || [];
       const prefs = usePrefs();
+      // What this host can actually do about hiding sessions. A host that lost
+      // part of that seam disables exactly those controls — instead of letting
+      // them fail at click time, or hiding a session it could no longer show.
+      const archive = (tree && tree.archiveSupport) || { ok: true, read: true, hide: true, show: true, missing: [] };
 
       const graphRef = React.useRef(null);
       const worldRef = React.useRef(null);
@@ -2058,14 +2077,14 @@ return {
               label: t('menuDemote'),
               // Archiving the session that is currently open would put the app
               // in a state it cannot navigate out of, so the open one stays.
-              hint: isOpenSession ? t('menuDemoteOpen') : null,
-              disabled: isOpenSession,
+              hint: !archive.hide ? t('archiveUnavailable') : (isOpenSession ? t('menuDemoteOpen') : null),
+              disabled: isOpenSession || !archive.hide,
               run: function () { moveVersion(node, 'demote'); },
             } : {
               key: 'promote',
               label: t('menuPromote'),
-              hint: null,
-              disabled: false,
+              hint: !archive.show ? t('archiveUnavailable') : null,
+              disabled: !archive.show,
               run: function () { moveVersion(node, 'promote'); },
             });
             return React.createElement('div', {
@@ -2102,7 +2121,8 @@ return {
           React.createElement('button', {
             type: 'button',
             className: 'mtx-tool',
-            title: t('collectOthers'),
+            title: archive.hide ? t('collectOthers') : t('archiveUnavailable'),
+            disabled: !archive.hide || undefined,
             onClick: function () { collectOthers(false); },
           }, CollectIcon()),
           React.createElement('button', {
@@ -2116,6 +2136,10 @@ return {
         ),
         tree && tree.error ? React.createElement('div', { className: 'mtx-error' }, tree.error) : null,
         renameError ? React.createElement('div', { className: 'mtx-error' }, renameError) : null,
+        // A degraded host is stated once, in place, rather than discovered by
+        // clicking something that silently does nothing.
+        archive.ok ? null : React.createElement('div', { className: 'mtx-notice' },
+          t('archivePartial', { parts: archive.missing.join('、') })),
         // Tidying up never kills work quietly: a version that is mid-turn gets
         // this question first. Drawn in the panel because the desktop shell
         // implements neither prompt() nor confirm().
