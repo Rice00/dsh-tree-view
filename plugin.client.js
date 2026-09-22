@@ -143,6 +143,11 @@ const restoredFamilies = new Set();
 // Restores that have been triggered but whose navigation has not landed yet.
 // While a root is in here we must not record it as the selection.
 const pendingRestore = new Set();
+// The session rendered just before the current one. Landing on a family root
+// from inside that same family is a deliberate move — the sidebar entry points
+// at the root, and that entry is how you leave a branch — while landing from
+// anywhere else is exactly what the restore is for.
+let lastViewedSessionId;
 
 /* --------------------------------------------------------------- prefs -- */
 
@@ -1301,6 +1306,8 @@ return {
         if (!versions || sessionId === undefined) return;
         const root = rootOf(versions, sessionId);
         if (!root) return;
+        const arrivedFrom = lastViewedSessionId;
+        lastViewedSessionId = sessionId;
         if (sessionId !== root) {
           // Arrived at a branch: that is now the remembered view, and any
           // restore we kicked off has landed.
@@ -1316,6 +1323,18 @@ return {
         if (restoredFamilies.has(root)) {
           // Already restored once this page load and the user walked back to
           // the root deliberately — honour that as the new selection.
+          activePathStore.set(root, root);
+          return;
+        }
+        // Walking to the root from inside its own family is a deliberate move:
+        // the sidebar entry points at the root, and that entry is how a branch
+        // is left. Chasing the remembered branch here is what made a click on
+        // the family's conversation land and then snap straight back to the
+        // branch it was opened from — and since the restore latches once per
+        // page load, it only ever showed up on the first click after a restart.
+        if (arrivedFrom !== undefined && arrivedFrom !== root
+          && rootOf(versions, arrivedFrom) === root) {
+          restoredFamilies.add(root);
           activePathStore.set(root, root);
           return;
         }
