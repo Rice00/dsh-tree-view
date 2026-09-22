@@ -799,6 +799,9 @@ const CSS = [
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
   '.mtx-card[data-labeled] .mtx-card-title{color:var(--dsw-alias-accent-primary,#4b8dff)}',
+  '.mtx-rename{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;z-index:7}',
+  '.mtx-rename-input{width:100%;box-sizing:border-box;font-family:inherit;font-size:12.5px;line-height:17px;padding:9px 11px;border-radius:13px;border:1px solid var(--dsw-alias-accent-primary,#4b8dff);background:var(--dsw-alias-bg-primary,#1e1e22);color:var(--dsw-alias-label-primary,#eee);outline:none;box-shadow:0 6px 22px rgba(0,0,0,.28)}',
+  '.mtx-rename-input::placeholder{color:var(--dsw-alias-label-tertiary,#888)}',
   '.mtx-card[data-deleted]:hover{box-shadow:0 2px 10px rgba(0,0,0,.14);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent)}',
   '.mtx-card-icon{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:12px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 18%,transparent);color:var(--dsw-alias-label-secondary,#bbb)}',
   '.mtx-card[data-path] .mtx-card-icon{background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 20%,transparent);color:var(--dsw-alias-accent-primary,#4b8dff)}',
@@ -897,7 +900,7 @@ return {
     const I18N_NS = 'dsh-tree-view';
     const I18N = {
       en: {
-        view: 'Versions',
+        view: 'Tree',
         edit: 'Edit message',
         cancel: 'Cancel',
         send: 'Send',
@@ -937,7 +940,7 @@ return {
         previewUser: 'Rewrite this paragraph to be more concise.',
       },
       zh: {
-        view: '版本',
+        view: 'Tree',
         edit: '编辑消息',
         cancel: '取消',
         send: '发送',
@@ -1289,6 +1292,14 @@ return {
       const renameErrorState = React.useState(null);
       const renameError = renameErrorState[0];
       const setRenameError = renameErrorState[1];
+      // The rename editor is drawn inside the graph, not through window.prompt:
+      // the Desktop shell does not implement prompt(), so a native dialog would
+      // silently do nothing there. The pending draft lives in a ref as well as
+      // in state so Enter and the blur that follows it cannot commit twice.
+      const renameEditorState = React.useState(null);
+      const renaming = renameEditorState[0];
+      const setRenaming = renameEditorState[1];
+      const pendingRename = React.useRef(null);
       const springs = React.useRef(new Map());
       const layoutRef = React.useRef(null);
       const viewRef = React.useRef({ x: 60, y: 42, scale: 1 });
@@ -1446,16 +1457,23 @@ return {
        * stays host-owned, which is the split the user asked for. Clearing the
        * text removes the name again.
        */
-      function renameVersion(n) {
+      function beginRename(n) {
         if (n.deleted) return;
-        const g = realGlobal();
-        const current = n.versionLabel || '';
-        const next = g && typeof g.prompt === 'function'
-          ? g.prompt(t('renamePrompt') + '（' + t('renameEmptyHint') + '）', current)
-          : null;
-        if (next === null || next === undefined) return;
         setRenameError(null);
-        mutate({ action: 'label', sessionId: n.sessionId, label: String(next) })
+        pendingRename.current = { nodeId: n.id, sessionId: n.sessionId, value: n.versionLabel || '' };
+        setRenaming({ ...pendingRename.current });
+      }
+
+      function commitRename() {
+        const draft = pendingRename.current;
+        pendingRename.current = null;
+        setRenaming(null);
+        if (!draft) return;
+        const next = draft.value.trim();
+        const version = versions.find(function (item) { return item.sessionId === draft.sessionId; });
+        const current = (version && version.label) || '';
+        if (next === current) return;
+        mutate({ action: 'label', sessionId: draft.sessionId, label: next })
           .then(function () { treeStore.load(sessionId); })
           .catch(function (error) {
             const message = error && error.message ? error.message : String(error);
@@ -1463,6 +1481,41 @@ return {
             console.warn('[dsh-tree-view] branch rename failed', error);
           });
       }
+
+      function cancelRename() {
+        pendingRename.current = null;
+        setRenaming(null);
+      }
+
+      // The Tree is a view of the conversation, not a chat: while it is open the
+      // host's composer block and the view's own width handles are hidden. Both
+      // live outside this React tree, so they are addressed through a generated
+      // stylesheet. The conversation module's class prefix is read off our own
+      // ancestor rather than hard-coded: the hashed scope changes between host
+      // builds, and a rename should degrade to "the chrome stays", never to a
+      // broken panel. The host unmounts inactive views, so mount/unmount is
+      // exactly the right lifetime.
+      React.useEffect(function () {
+        const graphEl = graphRef.current;
+        if (!graphEl) return undefined;
+        let scope = null;
+        for (let node = graphEl; node && node !== document.body; node = node.parentElement) {
+          const cls = typeof node.className === 'string' ? node.className : '';
+          const match = /(?:^|\s)(_[A-Za-z0-9]+_)[A-Za-z]/.exec(cls);
+          if (match) { scope = match[1]; break; }
+        }
+        if (scope === null) return undefined;
+        const style = document.createElement('style');
+        style.setAttribute('data-tree-view-chrome', '');
+        style.textContent = 'html.dsh-tree-view-active [class^="' + scope + 'composerStack"]{display:none !important}'
+          + 'html.dsh-tree-view-active [class^="' + scope + 'widthHandle"]{display:none !important}';
+        document.head.appendChild(style);
+        document.documentElement.classList.add('dsh-tree-view-active');
+        return function () {
+          document.documentElement.classList.remove('dsh-tree-view-active');
+          style.remove();
+        };
+      }, []);
 
       function onPointerDown(ev) {
         if (ev.button !== 0) return;
@@ -1570,7 +1623,7 @@ return {
               onContextMenu: function (ev) {
                 ev.preventDefault();
                 ev.stopPropagation();
-                renameVersion(n);
+                beginRename(n);
               },
               style: { transform: 'translate(' + (s.x - CARD_W / 2) + 'px,' + s.y + 'px)' },
               ref: function (el) { if (el) cardEls.current.set(n.id, el); else cardEls.current.delete(n.id); },
@@ -1582,7 +1635,39 @@ return {
                 React.createElement('span', { className: 'mtx-card-sub' }, sub)
               )
             );
-          })
+          }),
+          // The rename editor renders inside the world so it inherits the same
+          // pan/zoom transform as the card it replaces.
+          renaming === null ? null : (function () {
+            const s = springs.current.get(renaming.nodeId) || layout.pos.get(renaming.nodeId) || { x: 0, y: 0 };
+            return React.createElement('div', {
+              className: 'mtx-rename',
+              key: 'rename-editor',
+              style: { transform: 'translate(' + (s.x - CARD_W / 2) + 'px,' + s.y + 'px)' },
+            },
+              React.createElement('input', {
+                type: 'text',
+                className: 'mtx-rename-input',
+                value: renaming.value,
+                autoFocus: true,
+                maxLength: 60,
+                placeholder: t('renamePrompt'),
+                title: t('renameEmptyHint'),
+                onChange: function (ev) {
+                  if (pendingRename.current) pendingRename.current.value = ev.target.value;
+                  setRenaming({ nodeId: renaming.nodeId, sessionId: renaming.sessionId, value: ev.target.value });
+                },
+                onKeyDown: function (ev) {
+                  if (ev.key === 'Enter') { ev.preventDefault(); commitRename(); }
+                  else if (ev.key === 'Escape') { ev.preventDefault(); cancelRename(); }
+                },
+                onBlur: function () { commitRename(); },
+                onPointerDown: function (ev) { ev.stopPropagation(); },
+                onClick: function (ev) { ev.stopPropagation(); },
+                onContextMenu: function (ev) { ev.preventDefault(); ev.stopPropagation(); },
+              })
+            );
+          })()
         ),
         React.createElement('div', { className: 'mtx-graph-tools' },
           React.createElement('button', {
