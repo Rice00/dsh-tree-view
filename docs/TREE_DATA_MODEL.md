@@ -104,9 +104,14 @@ hidden inside a fold.
 - A fold inherits `current` / `onCurrentPath` only when **all** the turns it hides are on
   that line, so "the line you are reading" keeps reading as one line.
 - The threshold is **per run** (`foldSharedAt`, default 8 hidden turns; 0 disables it), so a
-  short run next to a long one stays drawn. The toolbar control ignores the threshold and
-  folds every run worth folding (two turns or more), which is also how an automatic fold is
-  undone; `foldModes` remembers that choice per family for the page.
+  short run next to a long one stays drawn. The same threshold governs the toolbar control,
+  which only expands and re-folds what the setting already allows — a control that folded
+  shorter runs than the setting was folding three-turn runs out of nowhere. `foldModes`
+  remembers "expanded" per family for the page.
+- How it is drawn: a squarer, single-line bar with two thin plates peeking out of its right
+  edge (a stack of turns with the top one labelled) and a chevron saying it opens. Solid
+  border, no dashes — a fold is not a broken link. Colour comes from `currentColor`, so an
+  accent fold on the line you are reading stays accent and the rest stay neutral.
 - Folding is a client-side view decision, not a data change: `buildTurnTree` still returns
   the full tree, and `foldLongRuns(nodes, threshold)` is applied on top of it.
 

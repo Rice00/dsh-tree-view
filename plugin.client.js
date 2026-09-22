@@ -1077,17 +1077,19 @@ const CSS = [
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px rgba(0,0,0,.3);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
-  // A folded stretch is not a turn, and it must not read like one: a compressed
-  // bar with a solid border and a thick left edge — the shape an editor gives a
-  // collapsed block — one line of text, and a chevron saying that it opens. No
-  // dashes: a fold is not a broken link, it is a stack of turns with the lid on.
-  // The accent (border, bar, text) is kept for the line you are reading.
-  '.mtx-card[data-fold]{width:176px;padding:7px 12px;border-radius:7px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 42%,transparent);border-left:4px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 11%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));align-items:center;gap:8px}',
-  '.mtx-card[data-fold] .mtx-card-icon{width:auto;height:auto;background:transparent;color:var(--dsw-alias-label-secondary,#bbb);font-size:13px;letter-spacing:.08em}',
-  '.mtx-card[data-fold] .mtx-card-title{font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary,#bbb);font-weight:600}',
-  '.mtx-card[data-fold][data-current]{border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 55%,transparent);border-left-color:var(--dsw-alias-accent-primary,#4b8dff)}',
-  '.mtx-card[data-fold][data-current] .mtx-card-title,.mtx-card[data-fold][data-current] .mtx-card-icon{color:var(--dsw-alias-accent-primary,#4b8dff)}',
-  '.mtx-fold-cue{margin-left:auto;flex:none;font-size:12px;line-height:1;color:color-mix(in srgb,var(--dsw-alias-label-secondary,#bbb) 80%,transparent)}',
+  // A folded stretch is not a turn, and it must not read like one: a squarer,
+  // single-line bar with two thin plates peeking out of its right edge — a stack
+  // of turns with the top one labelled — and a chevron saying that it opens. No
+  // dashes: a fold is not a broken link, it is turns with the lid on. Everything
+  // takes its colour from `currentColor`, so an accent fold stays accent and the
+  // neutral one stays neutral.
+  '.mtx-card[data-fold]{width:176px;padding:7px 12px;border-radius:9px;border:1px solid color-mix(in srgb,currentColor 42%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 13%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));color:var(--dsw-alias-label-secondary,#bbb);align-items:center;gap:8px}',
+  '.mtx-card[data-fold][data-current]{color:var(--dsw-alias-accent-primary,#4b8dff)}',
+  '.mtx-card[data-fold] .mtx-card-icon{width:auto;height:auto;background:transparent;color:inherit;font-size:13px;letter-spacing:.08em}',
+  '.mtx-card[data-fold] .mtx-card-title{font-size:12px;line-height:17px;color:inherit;font-weight:600}',
+  '.mtx-fold-plate{position:absolute;top:4px;bottom:4px;right:-8px;width:8px;border:1px solid color-mix(in srgb,currentColor 58%,transparent);border-left:0;border-radius:0 9px 9px 0;background:inherit}',
+  '.mtx-fold-plate[data-plate="2"]{top:9px;bottom:9px;right:-15px;width:7px;border-color:color-mix(in srgb,currentColor 40%,transparent)}',
+  '.mtx-fold-cue{margin-left:auto;flex:none;font-size:12px;line-height:1;color:inherit;opacity:.7}',
   '.mtx-card[data-labeled] .mtx-card-title{color:var(--dsw-alias-accent-primary,#4b8dff)}',
   '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 7%,transparent);z-index:0;pointer-events:none}',
   '.mtx-group-name{position:absolute;left:14px;top:-10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--dsw-alias-accent-primary,#4b8dff);background:var(--dsw-alias-bg-primary,#1e1e22);border:1px solid color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent)}',
@@ -1801,10 +1803,10 @@ return {
       }, [versions, sessionId, prefs.dropEmptyForks]);
 
       // Every long straight stretch of the tree — the shared history above the
-      // first fork, and the unbranched run any single branch continues on.
-      // `AUTO` folds the runs that reach the threshold from Settings; pressing
-      // the toolbar control folds every run worth folding (two turns or more),
-      // which is also how an automatic fold is undone.
+      // first fork, and the unbranched run any single branch continues on. Only
+      // the threshold in Settings decides what is long enough, for the automatic
+      // fold and for the toolbar control alike: a button that folded shorter runs
+      // than the setting allows was folding three-turn runs out of nowhere.
       const [, bumpFold] = React.useReducer(function (x) { return x + 1; }, 0);
       const FOLD_FLOOR = 2;
       const familyRootId = (function () {
@@ -1813,20 +1815,21 @@ return {
         }
         return null;
       })();
-      const foldMode = familyRootId ? (foldModes.get(familyRootId) || 'auto') : 'auto';
-      const autoFoldAt = prefs.foldSharedAt > 0 ? Math.max(prefs.foldSharedAt, FOLD_FLOOR) : 0;
-      const foldAt = foldMode === 'folded' ? FOLD_FLOOR : (foldMode === 'expanded' ? 0 : autoFoldAt);
-      const foldable = React.useMemo(function () { return foldLongRuns(fullNodes, FOLD_FLOOR); }, [fullNodes]);
-      const folds = React.useMemo(function () {
-        if (foldAt <= 0) return null;
-        return foldAt === FOLD_FLOOR ? foldable : foldLongRuns(fullNodes, foldAt);
-      }, [fullNodes, foldAt, foldable]);
+      const foldAt = prefs.foldSharedAt > 0 ? Math.max(prefs.foldSharedAt, FOLD_FLOOR) : 0;
+      const foldable = React.useMemo(function () {
+        return foldAt > 0 ? foldLongRuns(fullNodes, foldAt) : null;
+      }, [fullNodes, foldAt]);
+      // 'expanded' is the reader saying "show them" for this family; anything
+      // else follows the setting.
+      const foldExpanded = familyRootId ? foldModes.get(familyRootId) === 'expanded' : false;
+      const folds = foldExpanded ? null : foldable;
       const folded = !!folds;
       const turnNodes = folded ? folds.nodes : fullNodes;
 
-      function setFoldMode(mode) {
+      function setFoldExpanded(expanded) {
         if (!familyRootId) return;
-        foldModes.set(familyRootId, mode);
+        if (expanded) foldModes.set(familyRootId, 'expanded');
+        else foldModes.delete(familyRootId);
         bumpFold();
       }
 
@@ -2032,7 +2035,7 @@ return {
         if (!node || node.deleted) return;
         // The fold node is not a session; it is the shared history in one card,
         // and clicking it is how you read that history again.
-        if (node.fold) { setFoldMode('expanded'); return; }
+        if (node.fold) { setFoldExpanded(true); return; }
         if (!sessions) return;
         const v = versions.find(function (item) { return item.sessionId === node.sessionId; });
         if (!v) return;
@@ -2335,6 +2338,10 @@ return {
                 // shape. Every other node keeps its subtitle.
                 n.fold ? null : React.createElement('span', { className: 'mtx-card-sub' }, sub)
               ),
+              // The plates are what say "several turns live here": two thin
+              // sheets peeking out from behind the labelled one.
+              n.fold ? React.createElement('span', { className: 'mtx-fold-plate', 'data-plate': '1' }) : null,
+              n.fold ? React.createElement('span', { className: 'mtx-fold-plate', 'data-plate': '2' }) : null,
               n.fold ? React.createElement('span', { className: 'mtx-fold-cue' }, '⌄') : null
             );
           }),
@@ -2448,7 +2455,7 @@ return {
             'aria-pressed': folded ? 'true' : 'false',
             title: !foldable ? t('foldNothing') : (folded ? t('foldExpand') : t('foldCollapse')),
             disabled: !foldable || undefined,
-            onClick: function () { setFoldMode(folded ? 'expanded' : 'folded'); },
+            onClick: function () { setFoldExpanded(folded); },
           }, FoldIcon()),
           React.createElement('button', {
             type: 'button', className: 'mtx-tool', title: t('fit'),

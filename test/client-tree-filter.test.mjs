@@ -364,14 +364,16 @@ test('the fold opens when clicked, and the toolbar can close it again', async (t
   assert.equal(view.tools()[2].getAttribute('data-on'), '', 'and the toolbar reports it as folded');
 });
 
-test('a trunk shorter than the threshold stays drawn, and can still be folded by hand', async (t) => {
+test('a run below the threshold is never folded, not even by hand', async (t) => {
+  // Reported: a three-turn run folded. The threshold decides, for the automatic
+  // fold and for the toolbar alike — the control is not a way around it.
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 20 });
   assert.equal(view.foldCard(), null, 'a shared stretch below the threshold is left alone');
   assert.ok(view.cardIds().includes('session-root#t5'), 'so its turns are on the canvas');
+  assert.equal(view.tools()[2].disabled, true, 'and the control says there is nothing long enough');
 
   await view.clickTool(2);
-  assert.ok(view.foldCard(), 'the toolbar still folds it when asked');
-  assert.ok(!view.cardIds().includes('session-root#t5'));
+  assert.equal(view.foldCard(), null, 'pressing it folds nothing either');
 });
 
 test('a long run on one branch folds too, not only the shared history', async (t) => {
@@ -414,10 +416,10 @@ test('a long run on one branch folds too, not only the shared history', async (t
     'the head of the line is never hidden inside a fold');
 
   await view.clickTool(2);
-  assert.equal(cards().length, 0, 'the toolbar unfolds every stretch at once');
+  assert.equal(cards().length, 0, 'the toolbar unfolds the stretches');
   await view.clickTool(2);
-  assert.equal(cards().length, 2, 'and folds every run worth folding when asked by hand');
-  assert.ok(view.cardIds().includes('session-root#t1') === false, 'including the short shared run');
+  assert.equal(cards().length, 1, 'and folds them again, still only the ones the threshold allows');
+  assert.ok(view.cardIds().includes('session-root#t1'), 'the short shared run stays drawn throughout');
 });
 
 test('a family with nothing worth folding keeps the control out of the way', async (t) => {
