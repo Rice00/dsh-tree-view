@@ -625,7 +625,30 @@ function buildTurnTree(versions, currentSessionId) {
       const targetTurn = isFork ? v.forkTurn + 1 : (typeof v.targetTurn === 'number' ? v.targetTurn : 1);
       const ownTurns = turns.filter(function (t) { return t.turn >= targetTurn; });
 
-      if (ownTurns.length === 0) {
+      if (ownTurns.length === 0 && isFork) {
+        // A copy the user collected into the tree: it has no turns of its own,
+        // so it gets exactly one node, sitting at the fork point where it left
+        // the conversation — which is where its history actually branched.
+        const turnNodeId = v.sessionId + '#fork';
+        const attachTurn = v.forkTurn;
+        const parentId = attachTurn <= 0 ? rootNodeId : v.parentSessionId + '#t' + attachTurn;
+        const node = {
+          id: turnNodeId,
+          sessionId: v.sessionId,
+          turn: attachTurn,
+          parentId: parentId,
+          copy: true,
+          text: '',
+          time: v.createdAt || 0,
+          current: isCurrentSession,
+          onCurrentPath: false,
+          deleted: !!v.deleted,
+          archived: !!v.archived,
+          versionLabel: v.label || undefined,
+        };
+        nodes.push(node);
+        nodeMap.set(turnNodeId, node);
+      } else if (ownTurns.length === 0) {
         const turnNodeId = v.sessionId + '#t' + targetTurn;
         const parentId = findParentTurnNodeId(v, targetTurn);
         const node = {
@@ -980,6 +1003,8 @@ return {
         renameEmptyHint: 'Leave it empty to clear the name',
         renameFailed: 'Rename failed: {message}',
         menuHint: 'Right-click for branch actions',
+        copyBranch: 'Forked copy',
+        forkedAt: 'forked at turn {turn}',
         menuRename: 'Rename branch',
         menuPromote: 'Move to main chat',
         menuDemote: 'Collect into the tree',
@@ -1026,6 +1051,8 @@ return {
         renameEmptyHint: '留空即清除名字',
         renameFailed: '重命名失败：{message}',
         menuHint: '右键打开分支操作',
+        copyBranch: '分叉副本',
+        forkedAt: '分叉于第 {turn} 轮',
         menuRename: '重命名分支',
         menuPromote: '放到主对话',
         menuDemote: '收到 Tree 里',
@@ -1746,6 +1773,7 @@ return {
 
       function cardTitle(n) {
         if (n.deleted) return t('deletedVersion');
+        if (n.copy) return t('copyBranch');
         if (n.isRoot) return t('original');
         if (n.operation === 'edit') return t('edited', { turn: n.turn });
         if (n.operation === 'retry') return t('retried', { turn: n.turn });
@@ -1799,7 +1827,8 @@ return {
             // A named branch reads as a group: the name belongs to the box drawn
             // around the branch, and the node keeps saying what it is ("edited
             // turn 3"), so neither piece of information displaces the other.
-            const sub = (n.archived ? t('archivedTag') + ' · ' : '')
+            const sub = (n.copy ? t('forkedAt', { turn: n.turn }) + ' · ' : '')
+              + (n.archived ? t('archivedTag') + ' · ' : '')
               + (n.text ? '“' + clip(n.text, 44) + '” · ' : '')
               + (n.isRoot && !n.text && summary && summary.displayTitle ? clip(summary.displayTitle, 24) + ' · ' : '')
               + timeLabel(n.time);

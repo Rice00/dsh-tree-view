@@ -188,6 +188,28 @@ test('a fork that only copied history is not a branch', async () => {
     'the tree of a pure copy is the conversation it copied');
 });
 
+test('a copy the user collected into the tree stays, and says it is a copy', async () => {
+  const get = harness({
+    archived: ['session-copy'],
+    sessions: [
+      { id: 'session-root', forkTurns: 0, ownTurns: 14 },
+      { id: 'session-copy', parent: 'session-root', createdAt: 10, forkTurns: 12, ownTurns: 0 },
+    ],
+  });
+  assert.deepEqual((await get('session-root')).body.versions.map((v) => v.sessionId), ['session-root'],
+    'without the user saying so, a photocopy stays out of the tree');
+
+  setDemoted(stateFilePath(HOME), 'session-copy', true);
+  const collected = await get('session-root');
+  assert.deepEqual(collected.body.versions.map((v) => v.sessionId), ['session-root', 'session-copy'],
+    'collecting a copy into the tree is an explicit statement that it belongs there');
+  const copy = collected.body.versions[1];
+  assert.equal(copy.copy, true, 'and the panel is told it is a copy, not an edit branch');
+  assert.equal(copy.forkTurn, 12, 'with the turn it forked from');
+  assert.equal(copy.targetTurn, undefined, 'and no edit target');
+  setDemoted(stateFilePath(HOME), 'session-copy', false);
+});
+
 test('a fork that kept talking hangs off the turn it forked from', async () => {
   const get = harness({
     archived: [],
