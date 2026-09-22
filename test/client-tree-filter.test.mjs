@@ -21,7 +21,7 @@ const VERSIONS = [
   { sessionId: 'session-fork', parentSessionId: 'session-root', createdAt: 3, forkTurn: 15, turns: FORK_TURNS },
 ];
 
-async function mountView(t, prefs, versions = VERSIONS, fetchImpl) {
+async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId = 'session-root') {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
     url: 'https://tree-view.test/',
     pretendToBeVisual: true,
@@ -81,13 +81,18 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl) {
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
   });
   assert.equal(typeof view, 'function');
-  await act(async () => { root.render(React.createElement(view, { sessionId: 'session-root' })); });
+  await act(async () => { root.render(React.createElement(view, { sessionId: viewSessionId })); });
   await act(async () => { await Promise.resolve(); });
   const cardIds = () => [...dom.window.document.querySelectorAll('.mtx-card')].map((el) => el.getAttribute('data-id'));
   const offsets = () => [...dom.window.document.querySelectorAll('.mtx-card')].map((el) => el.style.transform);
   const titles = () => [...dom.window.document.querySelectorAll('.mtx-card-title')].map((el) => el.textContent);
   const links = () => [...dom.window.document.querySelectorAll('.mtx-card')]
-    .map((el) => ({ id: el.getAttribute('data-id'), parent: el.getAttribute('data-parent') }));
+    .map((el) => ({
+      id: el.getAttribute('data-id'),
+      parent: el.getAttribute('data-parent'),
+      current: el.hasAttribute('data-current'),
+      head: el.hasAttribute('data-head'),
+    }));
   const tools = () => [...dom.window.document.querySelectorAll('.mtx-graph-tools .mtx-tool')];
   const clickTool = (index) => act(async () => {
     tools()[index].dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
@@ -203,6 +208,24 @@ test('a host that cannot hide sessions turns those controls off and says so', as
 
   // Filtering has nothing to do with the archive seam and must stay usable.
   assert.equal(view.tools()[0].disabled, false, 'the filter still works');
+});
+
+test('reading a branch makes the shared history read as the same line', async (t) => {
+  // Opening the fork: the turns it shares with its parent are that fork's
+  // history, so they are highlighted exactly like the turns it adds. What stays
+  // plain is the parent's own later turns — the other branch.
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-fork');
+  const links = view.links();
+  const byId = new Map(links.map((link) => [link.id, link]));
+
+  assert.equal(byId.get('session-root#t1').current, true, 'the shared history is on the line');
+  assert.equal(byId.get('session-root#t15').current, true, 'including the turn the fork left from');
+  assert.equal(byId.get('session-root#root').current, true, 'and the conversation it started from');
+  assert.equal(byId.get('session-fork#t17').current, true, 'the fork owns the turns it added');
+  assert.equal(byId.get('session-root#t16').current, false,
+    'the parent\'s own later turn belongs to the other branch and stays plain');
+  assert.equal(links.filter((link) => link.head).length, 1, 'exactly one node marks where you are');
+  assert.equal(links.find((link) => link.head).id, 'session-fork#t17');
 });
 
 test('a gap in the turn numbering does not orphan the chain', async (t) => {

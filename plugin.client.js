@@ -781,7 +781,17 @@ function buildTurnTree(versions, currentSessionId, options) {
     activePathIds.add(pathCursor.id);
     pathCursor = pathCursor.parentId ? nodeMap.get(pathCursor.parentId) : null;
   }
-  activePathIds.add(rootNodeId);
+  // The lineage leading to where you are reads as "you are here" as well: when
+  // you open a branch, the shared history above the fork is that branch's
+  // history — the same turns, the same nodes — so it must not look demoted next
+  // to the turns you happen to be adding. What stays distinct is everything NOT
+  // on the line: the other branch's turns.
+  for (let i = 0; i < nodes.length; i++) {
+    nodes[i].current = nodes[i].current === true || activePathIds.has(nodes[i].id);
+  }
+  // The exact spot: the latest turn of the session actually being read. It is on
+  // the line like everything else, but it is the one you are adding to.
+  if (latestNode) latestNode.head = true;
 
   for (let i = 0; i < nodes.length; i++) {
     nodes[i].onCurrentPath = activePathIds.has(nodes[i].id);
@@ -912,14 +922,13 @@ const CSS = [
   '.mtx-edge[data-path]{stroke:var(--dsw-alias-accent-primary,#4b8dff);stroke-width:2}',
   '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));box-shadow:0 2px 10px rgba(0,0,0,.14);cursor:pointer;will-change:transform;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
   '.mtx-card:hover{box-shadow:0 6px 22px rgba(0,0,0,.24);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent)}',
-  // Two different facts, two different strengths. `data-current` is the session
-  // being read right now; `data-path` is the lineage that leads to where you are
-  // — and when you open a branch, the shared history above the fork is on that
-  // lineage, not "current". It used to show only as a tinted icon, which read as
-  // "the highlight disappeared". It gets a visible frame now, defined before the
-  // current rule so the session you are in still outranks it.
-  '.mtx-card[data-path]{border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 7%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)))}',
-  '.mtx-card[data-current]{border-color:var(--dsw-alias-accent-primary,#4b8dff);box-shadow:0 0 0 1px var(--dsw-alias-accent-primary,#4b8dff),0 6px 24px color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 30%,transparent)}',
+  // A card is highlighted when it is on the line you are reading: the turns you
+  // are adding and the shared history above the fork are the same line, so both
+  // carry `data-current`. What is not on that line — the other branch's turns —
+  // stays plain, which is what makes "where am I" readable. The node that is
+  // literally the open session gets one extra ring so the exact spot is findable.
+  '.mtx-card[data-current]{border-color:var(--dsw-alias-accent-primary,#4b8dff);box-shadow:0 0 0 1px color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 55%,transparent),0 6px 22px color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 22%,transparent)}',
+  '.mtx-card[data-head]{box-shadow:0 0 0 2px var(--dsw-alias-accent-primary,#4b8dff),0 8px 26px color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 34%,transparent)}',
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px rgba(0,0,0,.3);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
@@ -2011,6 +2020,7 @@ return {
               // asserts on this attribute directly.
               'data-parent': n.parentId || undefined,
               'data-current': n.current || undefined,
+              'data-head': n.head || undefined,
               'data-path': n.onCurrentPath || undefined,
               'data-deleted': n.deleted || undefined,
               'data-archived': n.archived || undefined,
