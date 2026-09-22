@@ -67,6 +67,8 @@ test('real DSH 0.1.5 constructor accepts a branch and setup clears rewound input
   get.method = 'GET'; get.url = '/tree-view?sessionId=native-fork';
   await route(get, { writeHead(value) { status = value; }, end(value) { result = JSON.parse(value); } });
   assert.equal(status, 200, JSON.stringify(result));
-  assert.equal(result.versions.find(version => version.sessionId === nativeFork.id).targetTurn, undefined,
-    'A native fork must not adopt its parent\'s inherited plugin marker');
+  assert.ok(!result.versions.some(version => version.sessionId === nativeFork.id),
+    'A native fork copied the whole log and added nothing: it is a photocopy, not a version');
+  assert.ok(!result.versions.some(version => version.operation !== undefined),
+    'and it must not lend its parent\'s inherited plugin marker to the tree as an edit branch');
 });

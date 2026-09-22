@@ -574,9 +574,17 @@ function buildTurnTree(versions, currentSessionId) {
       if (turn === 1) return rootNodeId;
       return v.sessionId + '#t' + (turn - 1);
     }
-    if (turn === v.targetTurn) {
-      if (v.targetTurn === 1) return rootNodeId;
-      return v.parentSessionId + '#t' + (v.targetTurn - 1);
+    // Where this version's own history begins, and therefore which of its
+    // parent's turns it hangs off. An edit branch re-runs the turn it targets; a
+    // fork (no marker, `forkTurn` supplied by the host) copied up to that turn
+    // and continues after it, so its first own turn hangs off the parent's fork
+    // turn. Hanging it off the root instead is what made a copy look like a
+    // second conversation sprouting from the original.
+    const isFork = typeof v.targetTurn !== 'number' && typeof v.forkTurn === 'number';
+    const firstOwnTurn = isFork ? v.forkTurn + 1 : v.targetTurn;
+    if (turn === firstOwnTurn) {
+      const attachTurn = isFork ? v.forkTurn : v.targetTurn - 1;
+      return attachTurn <= 0 ? rootNodeId : v.parentSessionId + '#t' + attachTurn;
     }
     return v.sessionId + '#t' + (turn - 1);
   }
@@ -611,7 +619,10 @@ function buildTurnTree(versions, currentSessionId) {
         nodeMap.set(turnNodeId, node);
       }
     } else {
-      const targetTurn = typeof v.targetTurn === 'number' ? v.targetTurn : 1;
+      // A fork carries only its own turns (the host drops pure copies and gives
+      // the fork turn), so the window into its history starts after the copy.
+      const isFork = typeof v.targetTurn !== 'number' && typeof v.forkTurn === 'number';
+      const targetTurn = isFork ? v.forkTurn + 1 : (typeof v.targetTurn === 'number' ? v.targetTurn : 1);
       const ownTurns = turns.filter(function (t) { return t.turn >= targetTurn; });
 
       if (ownTurns.length === 0) {

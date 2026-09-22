@@ -33,15 +33,23 @@ function harness(options) {
       isSeeded: spec.parent !== undefined,
       ...spec.parent === undefined ? {} : { parentSession: spec.parent },
     };
-    const events = [];
-    events.push({ seq: 0, time: 1, type: 'request/header', data: { header: { config: { provider: 'qa', model: 'qa' } } } });
-    events.push({ seq: 1, time: 2, type: 'turn/start', data: { turn: 1 } });
-    events.push({ seq: 2, time: 3, type: 'user/message', data: { id: 'm1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: spec.id }] } });
-    events.push({ seq: 3, time: 4, type: 'turn/end', data: { turn: 1 } });
-    if (spec.marker === true) {
-      events.push({ seq: 4, time: 5, type: 'message-tree/version', data: { schemaVersion: 1, sessionId: spec.id, effect: { operation: 'edit', targetTurn: 1 } }, ignorable: true });
+    // A seeded session's log is [inherited prefix][its own turns]. `forkTurns`
+    // is how much history it copied, `ownTurns` what it did afterwards — the
+    // difference between a branch and a photocopy.
+    const forkTurns = spec.parent === undefined ? 0 : (spec.forkTurns ?? 1);
+    const ownTurns = spec.parent === undefined ? 1 : (spec.ownTurns ?? 1);
+    const totalTurns = forkTurns + ownTurns;
+    const events = [{ seq: 0, time: 1, type: 'request/header', data: { header: { config: { provider: 'qa', model: 'qa' } } } }];
+    for (let turn = 1; turn <= totalTurns; turn++) {
+      events.push({ seq: events.length, time: turn * 3, type: 'turn/start', data: { turn } });
+      events.push({ seq: events.length, time: turn * 3 + 1, type: 'user/message', data: { id: 'm' + turn, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: spec.id + ' t' + turn }] } });
+      events.push({ seq: events.length, time: turn * 3 + 2, type: 'turn/end', data: { turn } });
     }
-    const session = { id: spec.id, header, inheritedEventCount: spec.parent === undefined ? 0 : 4, snapshotEvents: () => Object.freeze([...events]) };
+    if (spec.marker === true) {
+      events.push({ seq: events.length, time: 99, type: 'message-tree/version', data: { schemaVersion: 1, sessionId: spec.id, effect: { operation: 'edit', targetTurn: forkTurns > 0 ? forkTurns : 1 } }, ignorable: true });
+    }
+    const inheritedEventCount = forkTurns === 0 ? 0 : 1 + forkTurns * 3;
+    const session = { id: spec.id, header, inheritedEventCount, snapshotEvents: () => Object.freeze([...events]) };
     Object.defineProperty(session, 'seq', { get: () => events.length });
     Object.defineProperty(session, 'events', { get: () => { throw new Error('retired .events read'); } });
     records.set(spec.id, { session, events });
@@ -157,4 +165,42 @@ test('a live branch is untouched by the archived filter', async () => {
   });
   const response = await get('session-root');
   assert.deepEqual(response.body.versions.map((v) => v.sessionId), ['session-root', 'session-branch']);
+});
+
+test('a fork that only copied history is not a branch', async () => {
+  // The reported phantom: DSH's own fork copies the whole conversation, writes
+  // no version marker and adds nothing of its own. Drawn as a version it put a
+  // second full-length chain on the canvas, hanging off the root.
+  const get = harness({
+    archived: [],
+    sessions: [
+      { id: 'session-root', forkTurns: 0, ownTurns: 14 },
+      { id: 'session-copy', parent: 'session-root', createdAt: 10, forkTurns: 12, ownTurns: 0 },
+    ],
+  });
+  const response = await get('session-root');
+  assert.deepEqual(response.body.versions.map((v) => v.sessionId), ['session-root'],
+    'a photocopy is not a version');
+
+  // Opening the copy itself must still show the conversation, not an empty tree.
+  const fromCopy = await get('session-copy');
+  assert.deepEqual(fromCopy.body.versions.map((v) => v.sessionId), ['session-root'],
+    'the tree of a pure copy is the conversation it copied');
+});
+
+test('a fork that kept talking hangs off the turn it forked from', async () => {
+  const get = harness({
+    archived: [],
+    sessions: [
+      { id: 'session-root', forkTurns: 0, ownTurns: 14 },
+      { id: 'session-fork', parent: 'session-root', createdAt: 10, forkTurns: 12, ownTurns: 2 },
+    ],
+  });
+  const response = await get('session-root');
+  const fork = response.body.versions.find((v) => v.sessionId === 'session-fork');
+  assert.ok(fork, 'a fork with turns of its own is a branch');
+  assert.equal(fork.forkTurn, 12, 'and it says which of its parent turns it left from');
+  assert.equal(fork.targetTurn, undefined, 'it is not an edit branch: it names no target turn');
+  assert.deepEqual(fork.turns.map((t) => t.turn), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    'its turns still describe the whole log; the client windows them');
 });
