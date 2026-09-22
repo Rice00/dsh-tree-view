@@ -1,13 +1,13 @@
 # Development & Testing Guide
 
-This guide covers building, testing, packaging, and installing `dsh-plugin-message-edit`.
+This guide covers building, testing, packaging, and installing `dsh-tree-view`.
 
 ---
 
 ## 1. Repository Structure
 
 ```
-dsh-plugin-message-edit/
+dsh-tree-view/
 ├── lib/
 │   ├── index.js          # Host-side Cordis plugin (routes, session log processing)
 │   ├── tree-logic.js     # Pure tree algorithms (shared with client and tests)
@@ -26,7 +26,7 @@ dsh-plugin-message-edit/
 
 ## 2. Build Pipeline
 
-The client component [`plugin.client.js`](file:///D:/dsh-plugin-message-edit/plugin.client.js) is written in browser-compatible JavaScript. Before distribution or testing, it is wrapped with a Cordis module preamble into [`lib/client.js`](file:///D:/dsh-plugin-message-edit/lib/client.js).
+The client component [`plugin.client.js`](../plugin.client.js) is written in browser-compatible JavaScript. Before distribution or testing, it is wrapped with a Cordis module preamble into [`lib/client.js`](../lib/client.js).
 
 ### Build Client
 ```bash
@@ -88,13 +88,13 @@ the native viewer, enter/cancel an edit, then verify the original attachments
 survive an edit submission. CI's gallery double cannot verify native image
 loading, lightbox behavior, or compatibility with DSH's module injection.
 
-To add new tests, edit [`test/tree.test.mjs`](file:///D:/dsh-plugin-message-edit/test/tree.test.mjs).
+To add new tests, edit [`test/tree.test.mjs`](../test/tree.test.mjs).
 
 ### Optional real DSH acceptance
 
 `test/fixtures/dsh-acceptance.mjs` is an offline model adapter and live/cold
 session fixture for an installed official DSH `0.1.5-rc.2` runtime. Mount it
-only in a new temporary home whose name contains `message-edit-dsh-qa-`.
+only in a new temporary home whose name contains `tree-view-dsh-qa-`.
 Set `DSH_HOME` to that home and `DSH_QA_MODULES` to the official runtime's
 `node_modules` directory. Use a separate Web profile with the base/Web bundles,
 a built copy of this plugin, and a loader entry for the fixture. Never point
@@ -134,14 +134,14 @@ CI runs this on Linux and Windows in addition to the regression suite.
 npm run build
 npm pack
 ```
-This produces a tarball: `dsh-plugin-message-edit-0.1.0.tgz`.
+This produces a tarball: `dsh-tree-view-0.1.0.tgz`.
 
 ### Step 2: Install into DSH Profile
 To install into the DSH Desktop profile:
 ```bash
-dsh plugin --profile desktop add file:/path/to/dsh-plugin-message-edit-0.1.0.tgz
+dsh plugin --profile desktop add file:/path/to/dsh-tree-view-0.1.0.tgz
 ```
-Or sync files directly into `~/.dsh/profiles/desktop/node_modules/dsh-plugin-message-edit/`.
+Or sync files directly into `~/.dsh/profiles/desktop/node_modules/dsh-tree-view/`.
 
 ### Step 3: Restart DSH Desktop
 Restart DSH Desktop to reload the host-side plugin in the server process and mount the updated client interface.

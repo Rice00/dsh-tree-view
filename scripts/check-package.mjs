@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const output = mkdtempSync(join(tmpdir(), 'message-edit-package-'));
+const output = mkdtempSync(join(tmpdir(), 'tree-view-package-'));
 try {
   assert.ok(process.env.npm_execpath, 'Run this check through npm run check:package');
   const result = spawnSync(process.execPath, [

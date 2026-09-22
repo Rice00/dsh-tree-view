@@ -1,22 +1,22 @@
-# dsh-plugin-message-edit
+# dsh-tree-view
 
 English | [简体中文](README.md)
 
-[![npm](https://img.shields.io/npm/v/dsh-plugin-message-edit?color=cb3837&logo=npm)](https://www.npmjs.com/package/dsh-plugin-message-edit)
-[![CI](https://github.com/SpookySandwich/dsh-plugin-message-edit/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/SpookySandwich/dsh-plugin-message-edit/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dsh-tree-view?color=cb3837&logo=npm)](https://www.npmjs.com/package/dsh-tree-view)
+[![CI](https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![dsh](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff)](https://github.com/deepseek-ai/deepseek-harness)
-[![stars](https://img.shields.io/github/stars/SpookySandwich/dsh-plugin-message-edit?style=flat&label=stars)](https://github.com/SpookySandwich/dsh-plugin-message-edit/stargazers)
+[![stars](https://img.shields.io/github/stars/SpookySandwich/dsh-tree-view?style=flat&label=stars)](https://github.com/Rice00/dsh-tree-view/stargazers)
 
 Edit a message you already sent and the conversation **rewinds and branches** from that point, the way ChatGPT, Claude and DeepSeek all do it. The old version is not overwritten — a `‹ 2/4 ›` counter appears under the bubble, and a Versions tab draws the whole tree.
 
-![demo](https://raw.githubusercontent.com/SpookySandwich/dsh-plugin-message-edit/master/assets/demo.gif)
+![demo](https://raw.githubusercontent.com/SpookySandwich/dsh-tree-view/master/assets/demo.gif)
 
 ## Version Tree Visualization
 
 No matter how deeply conversations diverge or how many times prompts are edited, the **Versions** tab projects a clear, turn-level branching hierarchy with real-time active path highlights and instant navigation:
 
-![Version Tree](https://raw.githubusercontent.com/SpookySandwich/dsh-plugin-message-edit/master/assets/tree-demo.png)
+![Version Tree](https://raw.githubusercontent.com/SpookySandwich/dsh-tree-view/master/assets/tree-demo.png)
 
 ## What it does
 
@@ -45,7 +45,7 @@ Only Claude offers retry on a user message, matching the real interface. There i
 ## Install
 
 ```bash
-dsh plugin --profile web add dsh-plugin-message-edit
+dsh plugin --profile web add dsh-tree-view
 ```
 
 Restart DSH afterwards — the host half loads with the server. The interface follows DSH's display language (English / 中文).
@@ -54,7 +54,7 @@ Restart DSH afterwards — the host half loads with the server. The interface fo
 
 DSH sessions are append-only event logs with no in-session branching, so a rewind has to be built:
 
-- The host half serves `/message-tree`. Editing a message creates a **new session seeded with every event before the target turn**, writes a durable `message-tree/version` marker naming what changed, and submits the edited prompt.
+- The host half serves `/tree-view`. Editing a message creates a **new session seeded with every event before the target turn**, writes a durable `message-tree/version` marker naming what changed, and submits the edited prompt.
 - Those markers are read back to reconstruct the tree, the `‹ n/m ›` ring, and which branch you are currently on.
 - The marker is written with the envelope's `ignorable` flag. Plugin event types live outside the harness vocabulary, and without that flag the reader refuses to interpret the whole log — the session simply fails to open.
 - Only the plain `user` message node is shadowed, at priority `-1`. Reasoning, tool calls and steering rows keep the host renderer.
@@ -76,7 +76,7 @@ Version `1.1.0`: Fix seeded edit/retry creation, clear inherited pending input b
 
 The declared host range is `>=0.1.5-rc.2 <0.1.6-0`; the official `0.1.5-rc.2` runtime was verified. DSH `0.1.6` alpha is not claimed compatible. Keep the previous plugin release on older DSH. [Validation record](.github/reviews/dsh-0.1.5.md).
 
-Download the archive from the [GitHub Release](https://github.com/SpookySandwich/dsh-plugin-message-edit/releases/tag/v1.1.0), then run `dsh plugin --profile desktop add ./dsh-plugin-message-edit-1.1.0.tgz`.
+Download the archive from the [GitHub Release](https://github.com/Rice00/dsh-tree-view/releases/tag/v1.1.0), then run `dsh plugin --profile desktop add ./dsh-tree-view-1.1.0.tgz`.
 
 Version `1.1.0` has been verified in an isolated DSH `0.1.5-rc.2` Web environment:
 plugin loading, images, edit/retry, nested branches, and restored sessions. Model

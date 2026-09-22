@@ -1,22 +1,34 @@
-# dsh-plugin-message-edit
+# dsh-tree-view
 
 [English](README.en.md) | 简体中文
 
-[![npm](https://img.shields.io/npm/v/dsh-plugin-message-edit?color=cb3837&logo=npm)](https://www.npmjs.com/package/dsh-plugin-message-edit)
-[![CI](https://github.com/SpookySandwich/dsh-plugin-message-edit/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/SpookySandwich/dsh-plugin-message-edit/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/dsh-tree-view?color=cb3837&logo=npm)](https://www.npmjs.com/package/dsh-tree-view)
+[![CI](https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![dsh](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff)](https://github.com/deepseek-ai/deepseek-harness)
-[![stars](https://img.shields.io/github/stars/SpookySandwich/dsh-plugin-message-edit?style=flat&label=stars)](https://github.com/SpookySandwich/dsh-plugin-message-edit/stargazers)
+
+> 本仓库是 [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit)（MIT © SpookySandwich）的 **fork**，目标是把「对话分支」从散落的会话升级为 **一棵树 + 一个入口**。上游的分支引擎、版本树 UI 与全部测试都原样保留。
 
 编辑一条已经发出的消息，对话会从那一刻 **真正回溯并分叉**——和 ChatGPT、Claude、DeepSeek 的做法一致。旧版本不会被覆盖：气泡下方出现 `‹ 2/4 ›` 计数，「版本」标签页则画出整棵树。
 
-![演示](https://raw.githubusercontent.com/SpookySandwich/dsh-plugin-message-edit/master/assets/demo-zh.gif)
+## 本 fork 的改动（路线图）
+
+| 目标 | 状态 |
+| --- | --- |
+| 树节点**右键重命名**（只改树标签，不碰宿主会话标题） | 计划中 |
+| 宿主**能力探测 + 归档适配器**（不可用时优雅降级，绝不静默坏） | 计划中 |
+| **侧栏只留一个入口**：归档旧支、解归档新支（`ctx.workspaceRegistry`） | 计划中 |
+| 右键「**保存为正式会话**」/「回到树视图」（promote / demote） | 计划中 |
+
+## 继承自上游的能力
+
+![演示](https://raw.githubusercontent.com/Rice00/dsh-tree-view/main/assets/demo-zh.gif)
 
 ## 版本树分支展示
 
 无论对话如何深层分叉、编辑多少次，「版本」标签页均会呈现清晰的轮次级分支图，当前会话所在路径实时高亮，点击任意节点即可平滑跳转：
 
-![版本树](https://raw.githubusercontent.com/SpookySandwich/dsh-plugin-message-edit/master/assets/tree-demo.png)
+![版本树](https://raw.githubusercontent.com/Rice00/dsh-tree-view/main/assets/tree-demo.png)
 
 ## 功能
 
@@ -45,7 +57,7 @@
 ## 安装
 
 ```bash
-dsh plugin --profile web add dsh-plugin-message-edit
+dsh plugin --profile web add dsh-tree-view
 ```
 
 安装后请重启 DSH：宿主端随服务器加载。界面跟随 DSH 显示语言（中文 / English）。
@@ -54,14 +66,14 @@ dsh plugin --profile web add dsh-plugin-message-edit
 
 DSH 的会话是仅追加的事件日志，本身不支持会话内分支，因此回溯需要另行实现：
 
-- 宿主端提供 `/message-tree` 接口。编辑消息时，会 **以目标轮次之前的全部事件为种子创建一个新会话**，写入持久的 `message-tree/version` 标记说明改动内容，并把编辑后的提问送入。
+- 宿主端提供 `/tree-view` 接口。编辑消息时，会 **以目标轮次之前的全部事件为种子创建一个新会话**，写入持久的 `message-tree/version` 标记说明改动内容，并把编辑后的提问送入。
 - 之后读取这些标记，还原出整棵版本树、`‹ n/m ›` 计数，以及当前处于哪个分支。
 - 标记事件带有信封上的 `ignorable` 标志。插件自定义的事件类型不在宿主的事件词表内，缺少该标志时读取端会拒绝解释整份日志，会话将直接打不开。
 - 只遮蔽普通的 `user` 消息节点（优先级 `-1`）；思考、工具调用与引导消息仍由宿主渲染。
 
 宿主端的分支逻辑源自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)（MIT © Moeblack），在其基础上重做为 ChatGPT 式回溯语义、同级分支展开，以及上述界面预设。
 
-两者名字相近，这里说明一下：这是另一个独立插件。它的路由、cordis id 与持久事件类型都保留了 `message-tree` 这一套命名，正是为了两个插件可以同时安装而互不冲突。
+身份说明：本 fork 的 cordis 行 id 是 `tree-view`、HTTP 路由是 `/tree-view`，与上游的 `message-tree` 完全分开，所以两个插件可以并存安装；但**持久事件类型刻意保留上游的 `message-tree/version`** —— 这样上游已经分过叉的会话，在本 fork 里照样能读出树，迁移不需要改数据。
 
 ## 文档
 
@@ -72,18 +84,18 @@ DSH 的会话是仅追加的事件日志，本身不支持会话内分支，因�
 
 ## 兼容性
 
-版本 `1.1.0`：修复编辑/重试的 seed 边界，发布分支前清空继承的待发送输入，按会话身份识别版本标记，保留推理强度，并通过会话观察接口恢复持久分支。
+本 fork 的 `0.1.0` 基线 = 上游 `dsh-plugin-message-edit@1.1.0` 的全部能力（分支引擎、版本树、重命名之外的界面预设），仅重设了身份：包名 `dsh-tree-view`、cordis 行 id `tree-view`、路由 `/tree-view`、i18n 命名空间与本地存储键也一并改名，避免与上游并存时状态串味。
 
-声明兼容范围为 `>=0.1.5-rc.2 <0.1.6-0`；已验证官方 `0.1.5-rc.2`，不声明兼容 `0.1.6` alpha。旧版 DSH 请保留上一插件版本。[验证记录](.github/reviews/dsh-0.1.5.md)。
+声明兼容范围为 `>=0.1.5-rc.2 <0.1.6-0`（`package.json` 的 `engines.dsh`）；已验证官方 `0.1.5-rc.2`。DSH 仍在快速迭代，未验证的版本不在此保证范围内；更新插件后请重启 DSH。
 
-可从 [GitHub Release](https://github.com/SpookySandwich/dsh-plugin-message-edit/releases/tag/v1.1.0) 下载发布包，然后执行 `dsh plugin --profile desktop add ./dsh-plugin-message-edit-1.1.0.tgz`。
+从源码安装（开发期推荐，改完即用）：
 
-`1.1.0` 已在 DSH `0.1.5-rc.2` 的隔离 Web 环境验证：插件加载、图片显示、编辑与重试、深层分支，以及持久会话的恢复读取。模型回复使用本地测试实现，未调用远程模型服务。
+```bash
+dsh plugin --profile web add file:<仓库绝对路径>
+```
 
-兼容层保留了旧版 `events` / `seedLength` 接口支持，并由自动测试覆盖。DSH 仍在快速迭代，尚未验证的后续版本不在此保证范围内。更新插件后请重启 DSH。
-
-可与 [dsh-plugin-smooth-stream](https://github.com/SpookySandwich/dsh-plugin-smooth-stream)、[dsh-plugin-rollout-scout](https://github.com/SpookySandwich/dsh-plugin-rollout-scout) 共存。
+或先 `npm pack` 再装 tarball。
 
 ## 许可
 
-MIT © SpookySandwich。宿主端部分逻辑源自 dsh-message-edit（MIT © Moeblack）。
+MIT © Rice00（dsh-tree-view）。本仓库是 [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit)（MIT © SpookySandwich）的 fork；其宿主端分支逻辑源自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)（MIT © Moeblack）。两段原始版权声明均按 MIT 要求保留在 `LICENSE` 中。

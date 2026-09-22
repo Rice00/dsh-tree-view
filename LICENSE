@@ -1,5 +1,10 @@
 MIT License
 
+Copyright (c) 2026 Rice00 (dsh-tree-view)
+
+dsh-tree-view is a fork of dsh-plugin-message-edit. The original notices are
+retained below as the MIT License requires:
+
 Copyright (c) 2026 SpookySandwich
 
 Portions of the host-side branching logic are derived from dsh-message-edit,

@@ -1,4 +1,4 @@
-// dsh-plugin-message-tree — client half.
+// dsh-tree-view — client half.
 //
 // Mimics ChatGPT's edit-message behavior: hover a past prompt to edit it,
 // sending branches the conversation from that point (the host half performs
@@ -6,10 +6,10 @@
 // a Versions view draws the whole tree.
 
 // Route, CSS prefix and storage keys keep the `message-tree` spelling even
-// though the package is dsh-plugin-message-edit: Moeblack's dsh-message-edit
+// though the package is dsh-tree-view: Moeblack's dsh-message-edit
 // owns the `message-edit` names, and colliding would break both plugins when
 // installed together. See lib/index.js for the full note.
-const ROUTE = '/message-tree';
+const ROUTE = '/tree-view';
 const VIEW_ORDER = 16;
 
 function realGlobal() {
@@ -27,7 +27,7 @@ function realGlobal() {
 // inside the box or below it. Colours stay native in every preset. The choice
 // is one attribute on <html>, so the stylesheet keys off it and switching
 // takes effect live.
-const STYLE_KEY = 'dsh-plugin-message-tree:style';
+const STYLE_KEY = 'dsh-tree-view:style';
 const STYLES = ['chatgpt', 'deepseek', 'claude'];
 const DEFAULT_STYLE = 'chatgpt';
 
@@ -79,7 +79,7 @@ function syncStyleAttribute() {
 // and restore it when you land back on that root. Recording happens for every
 // family member you view, so walking the ring back to the root records the root
 // and the restore then correctly does nothing (no ping-pong).
-const PATH_KEY = 'dsh-plugin-message-tree:active-path';
+const PATH_KEY = 'dsh-tree-view:active-path';
 const PATH_LIMIT = 200;
 
 const activePathStore = {
@@ -147,7 +147,7 @@ const pendingRestore = new Set();
 
 // Behaviour toggles, persisted next to the style choice. Both default to the
 // behaviour the user asked for rather than the old one.
-const PREFS_KEY = 'dsh-plugin-message-tree:prefs';
+const PREFS_KEY = 'dsh-tree-view:prefs';
 const PREFS_DEFAULTS = {
   // Restore the last-viewed branch when reopening a conversation.
   rememberPath: true,
@@ -857,7 +857,7 @@ return {
   apply(ctx) {
     const slots = ctx.get('slots');
     if (slots === undefined) {
-      throw new Error('[dsh-plugin-message-edit] Missing DSH slots service. Check dsh.client.inject and restart DSH.');
+      throw new Error('[dsh-tree-view] Missing DSH slots service. Check dsh.client.inject and restart DSH.');
     }
     ctx.effect(function () { return styles.insert(CSS); });
     // Reflect the chosen edit style onto <html> now and on every change.
@@ -865,7 +865,7 @@ return {
 
     const sessions = ctx.get('sessions');
     if (!sessions || typeof sessions.open !== 'function') {
-      throw new Error('[dsh-plugin-message-edit] Missing DSH session navigation service. Check client dependencies and restart DSH.');
+      throw new Error('[dsh-tree-view] Missing DSH session navigation service. Check client dependencies and restart DSH.');
     }
 
     ctx.effect(function () {
@@ -887,7 +887,7 @@ return {
         : { byId: {} };
     }
 
-    const I18N_NS = 'dsh-plugin-message-tree';
+    const I18N_NS = 'dsh-tree-view';
     const I18N = {
       en: {
         view: 'Versions',
@@ -974,7 +974,7 @@ return {
         t = locale.bind(I18N_NS);
       }
     } catch (e) {
-      console.warn('[dsh-plugin-message-edit] Failed to register translations; using English.', e);
+      console.warn('[dsh-tree-view] Failed to register translations; using English.', e);
     }
 
     function PencilIcon() {
@@ -1544,7 +1544,7 @@ return {
         turnNodes.length <= 1 ? React.createElement('div', { className: 'mtx-empty' }, t('empty')) : null,
         React.createElement('a', {
           className: 'mtx-link',
-          href: 'https://github.com/SpookySandwich/dsh-plugin-message-edit',
+          href: 'https://github.com/Rice00/dsh-tree-view',
           target: '_blank', rel: 'noreferrer',
         }, 'GitHub ↗')
       );
@@ -1622,7 +1622,7 @@ return {
         ),
         React.createElement('a', {
           className: 'mtx-set-link',
-          href: 'https://github.com/SpookySandwich/dsh-plugin-message-edit',
+          href: 'https://github.com/Rice00/dsh-tree-view',
           target: '_blank', rel: 'noreferrer',
         }, 'GitHub ↗')
       );
@@ -1630,7 +1630,7 @@ return {
 
     slots.inject('settings.section', function () {
       return slots.register(
-        { name: 'settings.section', id: 'message-tree', order: 210, label: function () { return t('nav'); } },
+        { name: 'settings.section', id: 'tree-view', order: 210, label: function () { return t('nav'); } },
         StyleSettings
       );
     });
@@ -1645,7 +1645,7 @@ return {
           UserMessageView
         );
       } catch (e) {
-        console.warn('[dsh-plugin-message-edit] Failed to register the user-message view; editing is unavailable.', e);
+        console.warn('[dsh-tree-view] Failed to register the user-message view; editing is unavailable.', e);
         return function () {};
       }
     });
@@ -1654,7 +1654,7 @@ return {
       return slots.register(
         {
           name: 'conversation.view',
-          id: 'message-tree',
+          id: 'tree-view',
           order: VIEW_ORDER,
           label: function () { return t('view'); },
           inject: function (sessionId) { return { sessionId: sessionId }; },

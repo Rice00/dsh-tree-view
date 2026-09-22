@@ -1,7 +1,12 @@
-# The loader entry id stays `message-tree` on purpose: Moeblack's
-# dsh-message-edit uses the id `message-edit`, and two entries sharing an id
-# collide when both plugins are installed. `name` is the package to import,
-# so it follows the package rename.
+# dsh-tree-view mounts exactly one loader row. The id is `tree-view`, which is
+# distinct from both upstream spellings already in the wild — Moeblack's
+# `message-edit` and SpookySandwich's `message-tree` — so our fork can be
+# installed side by side with either while a migration is in flight. `name` is
+# the package to import, so it follows the package rename.
+#
+# Compatibility anchor that deliberately does NOT follow the rename: the durable
+# event type stays `message-tree/version`, so every session already branched by
+# the upstream plugin keeps reading in this fork (see lib/index.js).
 - insert:
-    - id: message-tree
-      name: dsh-plugin-message-edit
+    - id: tree-view
+      name: dsh-tree-view

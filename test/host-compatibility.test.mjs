@@ -110,7 +110,7 @@ function harness(modern, resumed = false) {
   async function request(method, body, id = 'source') {
     const req = Readable.from(body === undefined ? [] : [JSON.stringify(body)]);
     req.method = method;
-    req.url = `/message-tree?sessionId=${encodeURIComponent(id)}`;
+    req.url = `/tree-view?sessionId=${encodeURIComponent(id)}`;
     let status, payload;
     await route(req, {
       writeHead(code) { status = code; },

@@ -2,10 +2,10 @@
 
 Reviewed on 2026-09-07. Scope: restoring images in user-message bubbles.
 
-- Contributor PR: https://github.com/SpookySandwich/dsh-plugin-message-edit/pull/1
+- Contributor PR: https://github.com/Rice00/dsh-tree-view/pull/1
 - Reviewed contributor commit: `4e3ccfc50d016750e632d86c5b828aeb4a5d2a31`
 - Tests and CI commit: `4cb0fc31afb6ca3279ea34b6fc8998052dc4c35c`
-- Successful CI run: https://github.com/SpookySandwich/dsh-plugin-message-edit/actions/runs/34085150511
+- Successful CI run: https://github.com/Rice00/dsh-tree-view/actions/runs/34085150511
 
 ## Decision
 

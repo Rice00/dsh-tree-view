@@ -10,7 +10,7 @@ async function state() {
   return result;
 }
 async function post(body) {
-  const response = await fetch(`${base}/message-tree`, {
+  const response = await fetch(`${base}/tree-view`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
   });
   const result = await response.json();
@@ -51,7 +51,7 @@ for (const id of ['session-qa-live', 'session-qa-cold']) {
   const preserved = after.sessions.find(session => session.header.id === id).events;
   assert.deepEqual(preserved.slice(0, source.events.length), source.events);
   assert.equal(preserved.filter(isUser).length, 2);
-  const treeResponse = await fetch(`${base}/message-tree?sessionId=${result.sessionId}`);
+  const treeResponse = await fetch(`${base}/tree-view?sessionId=${result.sessionId}`);
   assert.equal(treeResponse.status, 200);
   const tree = await treeResponse.json();
   assert.equal(tree.versions.find(version => version.sessionId === result.sessionId).targetTurn, 1);
@@ -68,7 +68,7 @@ for (const id of ['session-qa-live', 'session-qa-cold']) {
   const nested = await post({ action: 'edit', sessionId: result.sessionId, eventSeq: laterUser.seq,
     blockIndex: 0, text: 'Nested turn-two edit.', stopPrevious: true });
   await state();
-  const nestedTree = await (await fetch(`${base}/message-tree?sessionId=${nested.sessionId}`)).json();
+  const nestedTree = await (await fetch(`${base}/tree-view?sessionId=${nested.sessionId}`)).json();
   const nestedVersion = nestedTree.versions.find(version => version.sessionId === nested.sessionId);
   assert.equal(nestedVersion.targetTurn, 2, 'The inherited turn-1 marker must not hide the new turn-2 marker');
   assert.equal(nestedVersion.parentSessionId, result.sessionId);

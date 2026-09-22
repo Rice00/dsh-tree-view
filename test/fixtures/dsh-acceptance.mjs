@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 assert.ok(process.env.DSH_QA_MODULES, 'Set DSH_QA_MODULES to the official runtime node_modules');
-assert.match(process.env.DSH_HOME ?? '', /message-edit-dsh-qa-/, 'Use a disposable QA home');
+assert.match(process.env.DSH_HOME ?? '', /tree-view-dsh-qa-/, 'Use a disposable QA home');
 const require = createRequire(join(process.env.DSH_QA_MODULES, 'package.json'));
 const { LlmAdapter, createUserMessage } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')));
 const { default: sharp } = await import(pathToFileURL(require.resolve('sharp')));

@@ -1,6 +1,6 @@
 # Tree Data Model & Algorithms
 
-This document details how conversation versions and turns are represented, branched, and visualized in `dsh-plugin-message-edit`.
+This document details how conversation versions and turns are represented, branched, and visualized in `dsh-tree-view`.
 
 ---
 
@@ -33,7 +33,7 @@ Turn Tree (Visualization):
 ## 2. Core Algorithms
 
 ### 2.1 Turn Tree Construction (`buildTurnTree`)
-*Location: [`lib/tree-logic.js`](file:///D:/dsh-plugin-message-edit/lib/tree-logic.js#L173), [`plugin.client.js`](file:///D:/dsh-plugin-message-edit/plugin.client.js#L415)*
+*Location: [`lib/tree-logic.js`](../lib/tree-logic.js#L173), [`plugin.client.js`](../plugin.client.js#L415)*
 
 Transforms `versions` into an array of turn nodes:
 1. **Root Conversation Node (`${rootSessionId}#root`)**: Represents the origin anchor of the conversation.
@@ -48,7 +48,7 @@ Transforms `versions` into an array of turn nodes:
 4. **Safety Fallback**: Any node whose computed `parentId` does not exist in the graph is automatically attached to `${rootSessionId}#root`, preventing disconnected subtrees.
 
 ### 2.2 Sibling Fan-Out (`attachParentId`)
-*Location: [`lib/tree-logic.js`](file:///D:/dsh-plugin-message-edit/lib/tree-logic.js#L9)*
+*Location: [`lib/tree-logic.js`](../lib/tree-logic.js#L9)*
 
 When a user edits Turn 1 repeatedly (e.g. Turn 1 $\rightarrow$ Edit 1 $\rightarrow$ Edit 2 while viewing Edit 1):
 - Without fan-out, edits form a chain: $A \rightarrow B \rightarrow C$.
@@ -56,7 +56,7 @@ When a user edits Turn 1 repeatedly (e.g. Turn 1 $\rightarrow$ Edit 1 $\rightarr
 - Result: Both Edit 1 and Edit 2 hang off $A$ as sibling branches.
 
 ### 2.3 Ghost Ancestor Recovery (`ancestorChainFromLog` & `collectFamily`)
-*Location: [`lib/tree-logic.js`](file:///D:/dsh-plugin-message-edit/lib/tree-logic.js#L110-L171)*
+*Location: [`lib/tree-logic.js`](../lib/tree-logic.js#L110-L171)*
 
 If an intermediate session in a family is deleted by the user in DSH:
 - The deleted session's own event log is gone.
@@ -65,7 +65,7 @@ If an intermediate session in a family is deleted by the user in DSH:
 - `collectFamily` ensures the family graph remains fully connected even when intermediate nodes are deleted.
 
 ### 2.4 Active Path Calculation
-*Location: [`lib/tree-logic.js`](file:///D:/dsh-plugin-message-edit/lib/tree-logic.js#L318-L339)*
+*Location: [`lib/tree-logic.js`](../lib/tree-logic.js#L318-L339)*
 
 To highlight only the active branch path without highlighting superseded sibling branches:
 1. Locate the latest turn node in `currentSessionId`.
@@ -73,7 +73,7 @@ To highlight only the active branch path without highlighting superseded sibling
 3. Mark only nodes on this walk with `onCurrentPath = true`.
 
 ### 2.5 Bubble Version Ring (`ringFor`)
-*Location: [`lib/tree-logic.js`](file:///D:/dsh-plugin-message-edit/lib/tree-logic.js#L30-L68)*
+*Location: [`lib/tree-logic.js`](../lib/tree-logic.js#L30-L68)*
 
 Calculates the `‹ n/m ›` counter under a message at `turn` while viewing `sessionId`:
 - Walks parent links to find the common fork point for that turn.
@@ -84,7 +84,7 @@ Calculates the `‹ n/m ›` counter under a message at `turn` while viewing `se
 
 ## 3. Graph Layout & Springs
 
-*Location: [`plugin.client.js`](file:///D:/dsh-plugin-message-edit/plugin.client.js#L567-L612)*
+*Location: [`plugin.client.js`](../plugin.client.js#L567-L612)*
 
 - **Tidy Tree Layout (`layoutTurnTree`)**:
   - Leaf nodes take successive horizontal slots (`cursor * SLOT_X`, where `SLOT_X = 206px`).

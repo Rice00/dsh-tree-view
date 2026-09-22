@@ -16,7 +16,7 @@ async function mount(t, content, renderMessageImages, options = {}) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
     url: 'https://message-edit.test/',
   });
-  dom.window.localStorage.setItem('dsh-plugin-message-tree:style', options.style ?? 'chatgpt');
+  dom.window.localStorage.setItem('dsh-tree-view:style', options.style ?? 'chatgpt');
   dom.window.fetch = async () => ({ ok: true, json: async () => ({ versions: options.versions ?? [] }) });
   const previous = new Map();
   const browserErrors = [];
@@ -52,7 +52,7 @@ async function mount(t, content, renderMessageImages, options = {}) {
   let plugin;
   dom.window.__ModuleLoader__ = {
     load({ id, factory }) {
-      assert.equal(id, 'dsh-plugin-message-edit');
+      assert.equal(id, 'dsh-tree-view');
       plugin = factory(name => {
         assert.equal(name, 'react');
         return React;

@@ -1,7 +1,7 @@
 {
-  "name": "dsh-plugin-message-edit",
-  "version": "1.1.0",
-  "description": "ChatGPT-style message editing for DeepSeek Harness: edit a past prompt to rewind and branch the conversation, switch versions with a counter under the bubble, and browse branches in a tree.",
+  "name": "dsh-tree-view",
+  "version": "0.1.0",
+  "description": "Tree-view conversation branching for DeepSeek Harness: keep one entry in the sidebar, branch and switch versions inside a tree, promote a branch to a formal session, and rename branches. A fork of dsh-plugin-message-edit (MIT).",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -23,17 +23,17 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SpookySandwich/dsh-plugin-message-edit.git"
+    "url": "git+https://github.com/Rice00/dsh-tree-view.git"
   },
   "keywords": [
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
     "cordis-plugin",
-    "message-edit",
-    "edit",
+    "tree-view",
     "branch",
-    "version-tree"
+    "version-tree",
+    "conversation-branching"
   ],
   "scripts": {
     "build": "node scripts/build-client.mjs",

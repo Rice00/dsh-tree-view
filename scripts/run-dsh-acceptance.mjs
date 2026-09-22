@@ -9,7 +9,7 @@ import { join, resolve, dirname } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 assert.ok(process.env.DSH_QA_MODULES, 'Set DSH_QA_MODULES to an official @deepseek-ai/dsh@0.1.5-rc.2 node_modules directory');
 const modules = resolve(process.env.DSH_QA_MODULES);
-const home = await mkdtemp(join(tmpdir(), 'message-edit-dsh-qa-'));
+const home = await mkdtemp(join(tmpdir(), 'tree-view-dsh-qa-'));
 const profile = join(home, 'profiles', 'web');
 let server;
 async function stop() {
@@ -23,9 +23,9 @@ async function stop() {
 try {
   await mkdir(join(profile, 'node_modules'), { recursive: true });
   await symlink(join(modules, '@deepseek-ai'), join(profile, 'node_modules', '@deepseek-ai'), 'junction');
-  await symlink(root, join(profile, 'node_modules', 'dsh-plugin-message-edit'), 'junction');
-  await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'message-edit-qa', private: true,
-    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-plugin-message-edit'] } } }));
+  await symlink(root, join(profile, 'node_modules', 'dsh-tree-view'), 'junction');
+  await writeFile(join(profile, 'package.json'), JSON.stringify({ name: 'tree-view-qa', private: true,
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-tree-view'] } } }));
   await writeFile(join(profile, 'cordis.patch.yml'), `- insert:\n    - id: offline-qa\n      name: ${JSON.stringify(join(root, 'test/fixtures/dsh-acceptance.mjs'))}\n`);
   for (const phase of ['fresh', 'restart']) {
     let output = '';
@@ -57,6 +57,6 @@ try {
 } finally {
   await stop();
   assert.equal(dirname(home), resolve(tmpdir()));
-  assert.ok(home.startsWith(join(resolve(tmpdir()), 'message-edit-dsh-qa-')));
+  assert.ok(home.startsWith(join(resolve(tmpdir()), 'tree-view-dsh-qa-')));
   await rm(home, { recursive: true, force: true });
 }

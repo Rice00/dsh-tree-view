@@ -1,6 +1,6 @@
 # Architecture Overview
 
-`dsh-plugin-message-edit` provides ChatGPT/Claude-style conversation branching and message editing for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).
+`dsh-tree-view` provides ChatGPT/Claude-style conversation branching and message editing for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).
 
 Because DSH session event logs are append-only without native in-session branching, this plugin splits responsibilities across a **Node.js Host Service** and a **Browser/Web Client**.
 
@@ -35,14 +35,14 @@ Because DSH session event logs are append-only without native in-session branchi
   `sessionId`; old markers without that field use the legacy inherited cut.
   Cold logs use `observeSession(..., { projectionMode: 'none' })` and release
   the observation lease; this restores seeded sessions through the correct API.
-- Registers the `/message-tree` HTTP route on `ctx.webServer`.
-- Owns branch creation transactions (`POST /message-tree`):
+- Registers the `/tree-view` HTTP route on `ctx.webServer`.
+- Owns branch creation transactions (`POST /tree-view`):
   1. Truncates parent events up to the target turn.
   2. Adds an ignorable `message-tree/version` marker to the constructor seed.
   3. Creates the agent and clears both inherited inbox queues in its setup,
      before publication can schedule the rewound original input.
   4. Flushes the branch and submits the edited prompt exactly once.
-- Owns graph queries (`GET /message-tree?sessionId=...`):
+- Owns graph queries (`GET /tree-view?sessionId=...`):
   - Traverses the session family DAG.
   - Recovers deleted/ghost ancestors from surviving descendants' event logs.
   - Extracts turn event boundaries for turn-level rendering.
@@ -87,7 +87,7 @@ DSH sessions are immutable append-only logs. When branching:
 
 ## 3. HTTP API
 
-### `GET /message-tree?sessionId={id}`
+### `GET /tree-view?sessionId={id}`
 Returns the entire conversation family surrounding the requested session.
 
 **Response Schema:**
@@ -126,7 +126,7 @@ Returns the entire conversation family surrounding the requested session.
 }
 ```
 
-### `POST /message-tree`
+### `POST /tree-view`
 Performs branch creation or reactivation.
 
 - **`edit`**: Rewinds to before the specified user turn, creates a new branched session, appends a durable `message-tree/version` marker, and submits the replacement prompt.
@@ -160,9 +160,9 @@ Performs branch creation or reactivation.
 
 ## 6. Naming & Namespaces
 
-- **NPM Package**: `dsh-plugin-message-edit`
+- **NPM Package**: `dsh-tree-view`
 - **Cordis Service Name**: `message-tree`
-- **HTTP Path**: `/message-tree`
+- **HTTP Path**: `/tree-view`
 - **Durable Event Type**: `message-tree/version`
 
-> The package uses `dsh-plugin-message-edit` for discovery, but retains `message-tree` in routes, cordis IDs, and event types to prevent collisions with prior third-party plugins (such as `dsh-message-edit`) and ensure seamless side-by-side operation.
+> The package uses `dsh-tree-view` for discovery, but retains `message-tree` in routes, cordis IDs, and event types to prevent collisions with prior third-party plugins (such as `dsh-message-edit`) and ensure seamless side-by-side operation.
