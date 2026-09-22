@@ -1077,17 +1077,17 @@ const CSS = [
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px rgba(0,0,0,.3);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
-  // A folded stretch is not a turn, and it must not read like one: a narrower
-  // pill with a striped texture standing for the turns inside it, one line of
-  // text, and a chevron saying that it opens. The current-path ring carries over
-  // as an accent-tinted dashed border instead of fighting it.
-  '.mtx-card[data-fold]{width:176px;padding:8px 12px;border-radius:999px;border:1px dashed color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);background:repeating-linear-gradient(90deg,color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 20%,transparent) 0 1px,transparent 1px 6px),color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 9%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));box-shadow:none;align-items:center;justify-content:center;gap:6px}',
-  '.mtx-card[data-fold]:hover{border-style:solid;box-shadow:0 6px 20px rgba(0,0,0,.22)}',
-  '.mtx-card[data-fold] .mtx-card-icon{width:auto;height:auto;background:transparent;color:var(--dsw-alias-label-secondary,#bbb);font-size:13px;letter-spacing:.1em}',
+  // A folded stretch is not a turn, and it must not read like one: a compressed
+  // bar with a solid border and a thick left edge — the shape an editor gives a
+  // collapsed block — one line of text, and a chevron saying that it opens. No
+  // dashes: a fold is not a broken link, it is a stack of turns with the lid on.
+  // The accent (border, bar, text) is kept for the line you are reading.
+  '.mtx-card[data-fold]{width:176px;padding:7px 12px;border-radius:7px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 42%,transparent);border-left:4px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 11%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));align-items:center;gap:8px}',
+  '.mtx-card[data-fold] .mtx-card-icon{width:auto;height:auto;background:transparent;color:var(--dsw-alias-label-secondary,#bbb);font-size:13px;letter-spacing:.08em}',
   '.mtx-card[data-fold] .mtx-card-title{font-size:12px;line-height:17px;color:var(--dsw-alias-label-secondary,#bbb);font-weight:600}',
-  '.mtx-card[data-fold][data-current]{border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 65%,transparent)}',
+  '.mtx-card[data-fold][data-current]{border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 55%,transparent);border-left-color:var(--dsw-alias-accent-primary,#4b8dff)}',
   '.mtx-card[data-fold][data-current] .mtx-card-title,.mtx-card[data-fold][data-current] .mtx-card-icon{color:var(--dsw-alias-accent-primary,#4b8dff)}',
-  '.mtx-fold-cue{flex:none;font-size:12px;line-height:1;color:color-mix(in srgb,var(--dsw-alias-label-secondary,#bbb) 80%,transparent)}',
+  '.mtx-fold-cue{margin-left:auto;flex:none;font-size:12px;line-height:1;color:color-mix(in srgb,var(--dsw-alias-label-secondary,#bbb) 80%,transparent)}',
   '.mtx-card[data-labeled] .mtx-card-title{color:var(--dsw-alias-accent-primary,#4b8dff)}',
   '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 7%,transparent);z-index:0;pointer-events:none}',
   '.mtx-group-name{position:absolute;left:14px;top:-10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--dsw-alias-accent-primary,#4b8dff);background:var(--dsw-alias-bg-primary,#1e1e22);border:1px solid color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent)}',
