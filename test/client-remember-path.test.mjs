@@ -35,9 +35,17 @@ const VERSIONS = [
     turns: [{ turn: 1, text: 'branch one', time: 2 }],
   },
   {
-    sessionId: 'session-other',
+    sessionId: 'session-branch2',
+    parentSessionId: 'session-root',
+    targetTurn: 1,
+    operation: 'edit',
     createdAt: 3,
-    turns: [{ turn: 1, text: 'other one', time: 3 }],
+    turns: [{ turn: 1, text: 'branch two', time: 3 }],
+  },
+  {
+    sessionId: 'session-other',
+    createdAt: 4,
+    turns: [{ turn: 1, text: 'other one', time: 4 }],
   },
 ];
 
@@ -61,9 +69,11 @@ async function mountChat(t, options = {}) {
   if (options.remembered) {
     dom.window.localStorage.setItem(PATH_KEY, JSON.stringify({ 'session-root': options.remembered }));
   }
-  const versions = VERSIONS.map((v) => (options.archiveBranch && v.sessionId === 'session-branch'
-    ? Object.assign({}, v, { archived: true })
-    : v));
+  const versions = VERSIONS.map((v) => {
+    if (options.archiveBranch && v.sessionId === 'session-branch') return Object.assign({}, v, { archived: true });
+    if (options.runningBranch && v.sessionId === 'session-branch') return Object.assign({}, v, { running: true });
+    return v;
+  });
   const posts = [];
   dom.window.fetch = async (url, init) => {
     if (init && init.method === 'POST') posts.push({ url, body: init.body });
@@ -241,4 +251,45 @@ test('the restore does not fire twice in one page load', async (t) => {
   await chat.render('session-other');
   await chat.render('session-root');
   assert.deepEqual(chat.opened, ['session-branch'], 'and not again on the next visit');
+});
+
+// Collecting the branch you leave is the one thing here that writes: it archives
+// a session, so it is off until the setting says otherwise.
+const collectOn = { v: 2, rememberPath: false, autoCollectPrevious: true };
+const collectOff = { v: 2, rememberPath: false };
+const bodies = (chat) => chat.posts.map((p) => JSON.parse(p.body));
+
+test('collecting the branch you leave is off unless asked for', async (t) => {
+  const chat = await mountChat(t, { prefs: collectOff });
+
+  await chat.render('session-branch');
+  await chat.render('session-branch2');
+  assert.deepEqual(bodies(chat), [], 'with the switch off the plugin archives nothing by itself');
+});
+
+test('with the switch on, the branch you leave is collected', async (t) => {
+  const chat = await mountChat(t, { prefs: collectOn });
+
+  await chat.render('session-branch');
+  await chat.render('session-branch2');
+  assert.deepEqual(bodies(chat), [{ action: 'demote', sessionId: 'session-branch' }],
+    'the branch you left went back into the tree');
+});
+
+test('the conversation itself is never collected', async (t) => {
+  const chat = await mountChat(t, { prefs: collectOn });
+
+  await chat.render('session-root');
+  await chat.render('session-branch');
+  assert.deepEqual(bodies(chat), [],
+    'leaving the conversation must not archive it — that entry is the family itself');
+});
+
+test('a branch that is still generating a reply is left alone', async (t) => {
+  const chat = await mountChat(t, { prefs: collectOn, runningBranch: true });
+
+  await chat.render('session-branch');
+  await chat.render('session-branch2');
+  assert.deepEqual(bodies(chat), [],
+    'archiving mid-turn would hide work that is still arriving, so it is skipped');
 });

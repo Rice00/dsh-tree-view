@@ -26,9 +26,13 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     url: 'https://tree-view.test/',
     pretendToBeVisual: true,
   });
-  dom.window.localStorage.setItem('dsh-tree-view:prefs', JSON.stringify(Object.assign({
-    rememberPath: true, stopOnEdit: true, dropEmptyForks: true,
-  }, prefs)));
+  // These tests are about the tree's shape, not about the fold, so the stored
+  // preferences switch the fold off unless a test asks for it. `'default'`
+  // leaves the key out entirely, which is how a fresh install looks — that is
+  // the only way to assert on the shipped default.
+  const stored = Object.assign({ rememberPath: true, stopOnEdit: true, dropEmptyForks: true, foldSharedAt: 0 }, prefs);
+  if (stored.foldSharedAt === 'default') delete stored.foldSharedAt;
+  dom.window.localStorage.setItem('dsh-tree-view:prefs', JSON.stringify(stored));
   dom.window.fetch = fetchImpl ?? (async () => ({ ok: true, json: async () => ({ versions }) }));
   const previous = new Map();
   const browserErrors = [];
@@ -97,6 +101,14 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   const clickTool = (index) => act(async () => {
     tools()[index].dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   });
+  // Cards act on pointerup, the way the canvas does: press, release, done.
+  const clickCard = (id) => act(async () => {
+    const el = dom.window.document.querySelector('.mtx-card[data-id="' + id + '"]');
+    assert.ok(el, 'card ' + id + ' is drawn');
+    el.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }));
+    el.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, cancelable: true, button: 0 }));
+  });
+  const foldCard = () => dom.window.document.querySelector('.mtx-card[data-fold]');
   const confirmTitle = () => (dom.window.document.querySelector('.mtx-confirm-title') || {}).textContent ?? null;
   const confirmButtons = () => [...dom.window.document.querySelectorAll('.mtx-confirm .mtx-btn')].map((b) => b.textContent);
   const clickConfirm = (label) => act(async () => {
@@ -118,7 +130,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     return !!graph && graph.hasAttribute('data-panning');
   };
   return {
-    dom, cardIds, offsets, titles, links, tools, clickTool,
+    dom, cardIds, offsets, titles, links, tools, clickTool, clickCard, foldCard,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
   };
 }
@@ -190,10 +202,11 @@ test('the toolbar says what it does in a line, and asks before stopping work', a
   });
 
   const labels = view.tools().map((el) => el.getAttribute('title'));
-  assert.equal(labels.length, 4, 'filter, collect, fit, refresh');
+  assert.equal(labels.length, 5, 'filter, collect, fold, fit, refresh');
   assert.ok(labels[0].length <= 24, 'the filter tooltip is a line, not a paragraph: ' + labels[0]);
   assert.ok(view.tools()[0].querySelector('svg'), 'the filter uses an icon, not a punctuation mark');
   assert.ok(view.tools()[1].querySelector('svg'), 'and so does collect');
+  assert.ok(view.tools()[2].querySelector('svg'), 'and the fold control');
 
   await view.clickTool(1);
   assert.ok(posts.some((p) => p.action === 'demoteOthers'), 'collect asks the host');
@@ -309,4 +322,71 @@ test('a toggle is written with the current preference schema', async (t) => {
   assert.equal(stored.v, 2, 'the write carries the schema version, so a later read honours the choice');
   assert.equal(stored.dropEmptyForks, false, 'and the toggle that was flipped');
   assert.equal(stored.stopOnEdit, true, 'while the other toggles ride along in the same object');
+});
+
+test('a long shared history is drawn as one node', async (t) => {
+  // With empty forks hidden, this family's branches share turns 1..14 and part
+  // at turn 15 — a stretch that is the same reading in every branch. The shipped
+  // default folds it into one card.
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' });
+
+  const card = view.foldCard();
+  assert.ok(card, 'the trunk is folded into one card');
+  assert.ok(card.textContent.includes('14 shared turns'),
+    'the card says how much it hides: ' + card.textContent);
+  assert.ok(!view.cardIds().includes('session-root#t5'), 'the turns it hides are off the canvas');
+  assert.ok(view.cardIds().includes('session-root#root'), 'the conversation itself stays');
+  assert.ok(view.cardIds().includes('session-root#t15'), 'and so does the turn where the branches part');
+
+  const links = view.links();
+  const foldId = card.getAttribute('data-id');
+  assert.equal((links.find((l) => l.id === foldId) || {}).parent, 'session-root#root',
+    'the fold hangs from the conversation');
+  assert.equal((links.find((l) => l.id === 'session-root#t15') || {}).parent, foldId,
+    'and the branch point hangs from the fold');
+  for (const offset of view.offsets()) {
+    assert.ok(!/NaN|undefined/.test(offset), 'every card is placed: ' + offset);
+  }
+});
+
+test('the fold opens when clicked, and the toolbar can close it again', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' });
+  const foldId = view.foldCard().getAttribute('data-id');
+
+  await view.clickCard(foldId);
+  assert.equal(view.foldCard(), null, 'unfolded: no fold card is left');
+  assert.ok(view.cardIds().includes('session-root#t5'), 'and the shared turns are drawn again');
+  assert.equal(view.tools()[2].getAttribute('data-on'), null, 'the toolbar reports it as open');
+
+  await view.clickTool(2);
+  assert.ok(view.foldCard(), 'the toolbar folds it again');
+  assert.ok(!view.cardIds().includes('session-root#t5'), 'the shared turns are off the canvas again');
+  assert.equal(view.tools()[2].getAttribute('data-on'), '', 'and the toolbar reports it as folded');
+});
+
+test('a trunk shorter than the threshold stays drawn, and can still be folded by hand', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 20 });
+  assert.equal(view.foldCard(), null, 'a shared stretch below the threshold is left alone');
+  assert.ok(view.cardIds().includes('session-root#t5'), 'so its turns are on the canvas');
+
+  await view.clickTool(2);
+  assert.ok(view.foldCard(), 'the toolbar still folds it when asked');
+  assert.ok(!view.cardIds().includes('session-root#t5'));
+});
+
+test('a family with nothing worth folding keeps the control out of the way', async (t) => {
+  // Two turns and no branches: the only thing a fold could hide is one turn,
+  // which trades a card for a card.
+  const flat = [{
+    sessionId: 'session-only',
+    createdAt: 1,
+    current: true,
+    turns: [
+      { turn: 1, text: 'one', time: 1 },
+      { turn: 2, text: 'two', time: 2 },
+    ],
+  }];
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, flat, undefined, 'session-only');
+  assert.equal(view.foldCard(), null, 'nothing is folded');
+  assert.equal(view.tools()[2].disabled, true, 'and the fold control says it has nothing to do');
 });

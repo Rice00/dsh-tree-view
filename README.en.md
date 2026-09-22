@@ -21,7 +21,9 @@ Edit a message you already sent and the conversation **rewinds and branches** fr
 | **Hide content-less forks** switch (forks that only copied the conversation) | done |
 | **Shared turns merged**: a fork's copied turns are the same nodes as its parent's | done |
 | **Capability probe + archive adapter** (degrade loudly, never silently) | done |
-| View controls for large families (collapse a branch, last N turns) | open |
+| **Shared-history folding**: the stretch every branch has in common folds into one node past a threshold and opens again when clicked (the toolbar folds and unfolds it too) | done |
+| **Collect the branch you leave** when you switch branches (off by default, a switch in Settings; never the conversation itself, and a reply that is still generating is skipped) | done |
+| A truncated "last N turns" view | open |
 
 ![demo](https://raw.githubusercontent.com/Rice00/dsh-tree-view/main/assets/demo.gif)
 

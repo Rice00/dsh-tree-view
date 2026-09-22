@@ -80,6 +80,25 @@ Calculates the `‹ n/m ›` counter under a message at `turn` while viewing `se
 - Filters out deleted/ghost sessions (renumbering over surviving versions).
 - Returns `{ alternatives, index }`. If fewer than 2 alternatives exist, returns `null` (counter is hidden).
 
+### 2.6 Shared-History Folding (`foldSharedHistory`)
+*Location: [`plugin.client.js`](../plugin.client.js)*
+
+A deep family can spend most of its canvas on the stretch every branch has in common.
+Walking down from `${rootSessionId}#root`, every node with **exactly one child** is such a
+turn; the first node with two or more children is where the branches actually part.
+
+- The hidden stretch is everything between the origin and that branch point. Both ends stay
+  drawn: the origin (`#root`) and the branch point (where the eye needs to land).
+- The hidden turns are replaced by one synthetic node, `id = <origin>#fold`, carrying
+  `fold: true` and `foldCount`. Its parent is the origin, and the branch point is re-parented
+  onto it — so the chain stays connected and no card is orphaned into its own root.
+- Because every hidden node has exactly one child by construction, no other node can hang off
+  a hidden one; the fold cannot create a dangling parent.
+- The fold node inherits `current` / `onCurrentPath` only when **all** the turns it hides are
+  on that line, so "the line you are reading" keeps reading the same.
+- Folding is a client-side view decision, not a data change: `buildTurnTree` still returns the
+  full tree, and `foldSharedHistory(fullNodes, 2)` is applied on top of it.
+
 ---
 
 ## 3. Graph Layout & Springs
