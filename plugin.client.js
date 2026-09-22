@@ -539,11 +539,12 @@ function buildTurnTree(versions, currentSessionId, options) {
   const dropEmptyForks = !options || options.dropEmptyForks !== false;
   const kept = versions.filter(function (v) {
     // A fork that copied the history and never added a turn of its own is a
-    // photocopy. It doubles the canvas and makes the real history look like it
-    // forked twice, so it is hidden — unless the user collected it into the
-    // tree, or switched the filter off to look at everything.
+    // photocopy: it doubles the canvas and makes the real history look like it
+    // forked twice. The switch in the panel decides whether it is drawn — a
+    // photocopy has no new content, so it is the switch's business and nothing
+    // else's.
     if (!dropEmptyForks) return true;
-    return v.copy !== true || v.collected === true;
+    return v.copy !== true;
   });
   if (kept.length === 0) return [];
   const byId = new Map(kept.map(function (v) { return [v.sessionId, v]; }));
@@ -583,42 +584,36 @@ function buildTurnTree(versions, currentSessionId, options) {
   nodes.push(rootNode);
   nodeMap.set(rootNodeId, rootNode);
 
-  function findParentTurnNodeId(v, turn) {
-    if (!v.parentSessionId) {
-      if (turn === 1) return rootNodeId;
-      return v.sessionId + '#t' + (turn - 1);
-    }
-    // Where this version's own history begins, and therefore which of its
-    // parent's turns it hangs off. An edit branch re-runs the turn it targets; a
-    // fork (no marker, `forkTurn` supplied by the host) copied up to that turn
-    // and continues after it, so its first own turn hangs off the parent's fork
-    // turn. Hanging it off the root instead is what made a copy look like a
-    // second conversation sprouting from the original.
-    const isFork = typeof v.targetTurn !== 'number' && typeof v.forkTurn === 'number';
-    const firstOwnTurn = isFork ? v.forkTurn + 1 : (typeof v.targetTurn === 'number' ? v.targetTurn : 1);
-    if (turn === firstOwnTurn) {
-      const attachTurn = isFork ? v.forkTurn : firstOwnTurn - 1;
-      return attachTurn <= 0 ? rootNodeId : v.parentSessionId + '#t' + attachTurn;
-    }
-    return v.sessionId + '#t' + (turn - 1);
-  }
-
+  // Turn numbers are NOT contiguous. A turn that is interrupted or steered into
+  // never writes its `turn/end`, so this conversation is missing 13 and 19 while
+  // still counting 18 turns. Parenting by `turn - 1` therefore invents nodes that
+  // do not exist, and the guard below then re-hangs those nodes on the ROOT —
+  // which is exactly the "turn 14 hangs off the original" the user reported.
+  //
+  // So: build every node first, then link them by what actually exists.
+  const byVersion = new Map();
   for (let i = 0; i < kept.length; i++) {
     const v = kept[i];
     const isCurrentSession = v.sessionId === currentSessionId;
     const turns = Array.isArray(v.turns) && v.turns.length > 0 ? v.turns : [];
+    const isFork = typeof v.targetTurn !== 'number' && typeof v.forkTurn === 'number';
+    const list = [];
+    const push = function (node) {
+      nodes.push(node);
+      nodeMap.set(node.id, node);
+      list.push(node);
+    };
+    const ownTurns = v.parentSessionId === undefined
+      ? turns
+      : turns.filter(function (t) { return t.turn >= (isFork ? v.forkTurn + 1 : (typeof v.targetTurn === 'number' ? v.targetTurn : 1)); });
 
     if (!v.parentSessionId) {
       for (let j = 0; j < turns.length; j++) {
         const t = turns[j];
-        const turnNum = t.turn;
-        const turnNodeId = v.sessionId + '#t' + turnNum;
-        const parentId = findParentTurnNodeId(v, turnNum);
-        const node = {
-          id: turnNodeId,
+        push({
+          id: v.sessionId + '#t' + t.turn,
           sessionId: v.sessionId,
-          turn: turnNum,
-          parentId: parentId,
+          turn: t.turn,
           time: t.time || v.createdAt,
           text: t.text || '',
           current: isCurrentSession,
@@ -628,87 +623,94 @@ function buildTurnTree(versions, currentSessionId, options) {
           // Every node of a named version carries the name so the group frame
           // can wrap the whole branch, not just the node where it starts.
           versionLabel: v.label || undefined,
-        };
-        nodes.push(node);
-        nodeMap.set(turnNodeId, node);
+        });
       }
+    } else if (isFork && ownTurns.length === 0) {
+      // A copy the user collected into the tree: one node, at its fork point.
+      push({
+        id: v.sessionId + '#fork',
+        sessionId: v.sessionId,
+        turn: v.forkTurn,
+        copy: true,
+        text: '',
+        time: v.createdAt || 0,
+        current: isCurrentSession,
+        onCurrentPath: false,
+        deleted: !!v.deleted,
+        archived: !!v.archived,
+        versionLabel: v.label || undefined,
+      });
+    } else if (ownTurns.length === 0) {
+      const targetTurn = typeof v.targetTurn === 'number' ? v.targetTurn : 1;
+      push({
+        id: v.sessionId + '#t' + targetTurn,
+        sessionId: v.sessionId,
+        turn: targetTurn,
+        operation: v.operation || 'edit',
+        text: v.after || v.before || '',
+        time: v.createdAt || 0,
+        current: isCurrentSession,
+        onCurrentPath: false,
+        deleted: !!v.deleted,
+        archived: !!v.archived,
+        versionLabel: v.label || undefined,
+      });
     } else {
-      // A fork carries only its own turns (the host drops pure copies and gives
-      // the fork turn), so the window into its history starts after the copy.
-      const isFork = typeof v.targetTurn !== 'number' && typeof v.forkTurn === 'number';
       const targetTurn = isFork ? v.forkTurn + 1 : (typeof v.targetTurn === 'number' ? v.targetTurn : 1);
-      const ownTurns = turns.filter(function (t) { return t.turn >= targetTurn; });
-
-      if (ownTurns.length === 0 && isFork) {
-        // A copy the user collected into the tree: it has no turns of its own,
-        // so it gets exactly one node, sitting at the fork point where it left
-        // the conversation — which is where its history actually branched.
-        const turnNodeId = v.sessionId + '#fork';
-        const attachTurn = v.forkTurn;
-        const parentId = attachTurn <= 0 ? rootNodeId : v.parentSessionId + '#t' + attachTurn;
-        const node = {
-          id: turnNodeId,
+      for (let j = 0; j < ownTurns.length; j++) {
+        const t = ownTurns[j];
+        const isForkTurn = t.turn === targetTurn;
+        push({
+          id: v.sessionId + '#t' + t.turn,
           sessionId: v.sessionId,
-          turn: attachTurn,
-          parentId: parentId,
-          copy: true,
-          text: '',
-          time: v.createdAt || 0,
+          turn: t.turn,
+          operation: isForkTurn ? v.operation : undefined,
+          text: t.text || (isForkTurn ? (v.after || v.before || '') : ''),
+          time: t.time || v.createdAt,
           current: isCurrentSession,
           onCurrentPath: false,
           deleted: !!v.deleted,
           archived: !!v.archived,
+          // A version's name belongs to every node it owns, so the group frame
+          // wraps the whole branch: the fork point and everything it grows
+          // afterwards, but none of its own branches.
           versionLabel: v.label || undefined,
-        };
-        nodes.push(node);
-        nodeMap.set(turnNodeId, node);
-      } else if (ownTurns.length === 0) {
-        const turnNodeId = v.sessionId + '#t' + targetTurn;
-        const parentId = findParentTurnNodeId(v, targetTurn);
-        const node = {
-          id: turnNodeId,
-          sessionId: v.sessionId,
-          turn: targetTurn,
-          parentId: parentId,
-          operation: v.operation || 'edit',
-          text: v.after || v.before || '',
-          time: v.createdAt || 0,
-          current: isCurrentSession,
-          onCurrentPath: false,
-          deleted: !!v.deleted,
-          archived: !!v.archived,
-          versionLabel: v.label || undefined,
-        };
-        nodes.push(node);
-        nodeMap.set(turnNodeId, node);
-      } else {
-        for (let j = 0; j < ownTurns.length; j++) {
-          const t = ownTurns[j];
-          const turnNum = t.turn;
-          const turnNodeId = v.sessionId + '#t' + turnNum;
-          const parentId = findParentTurnNodeId(v, turnNum);
-          const isForkTurn = turnNum === targetTurn;
-          const node = {
-            id: turnNodeId,
-            sessionId: v.sessionId,
-            turn: turnNum,
-            parentId: parentId,
-            operation: isForkTurn ? v.operation : undefined,
-            text: t.text || (isForkTurn ? (v.after || v.before || '') : ''),
-            time: t.time || v.createdAt,
-            current: isCurrentSession,
-            onCurrentPath: false,
-            deleted: !!v.deleted,
-            archived: !!v.archived,
-            // A version's name belongs to every node it owns, so the group
-            // frame wraps the whole branch: the fork point and everything it
-            // grows afterwards, but none of its own branches.
-            versionLabel: v.label || undefined,
-          };
-          nodes.push(node);
-          nodeMap.set(turnNodeId, node);
-        }
+        });
       }
+    }
+    if (list.length > 0) byVersion.set(v.sessionId, list);
+  }
+
+  /** The latest node of `versionId` that sits at or before `turn`. */
+  function nearestNodeAt(versionId, turn) {
+    const list = byVersion.get(versionId);
+    if (!list) return null;
+    let best = null;
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].turn <= turn && (best === null || list[i].turn > best.turn)) best = list[i];
+    }
+    return best;
+  }
+
+  for (let i = 0; i < kept.length; i++) {
+    const v = kept[i];
+    const list = byVersion.get(v.sessionId);
+    if (!list) continue;
+    const isFork = typeof v.targetTurn !== 'number' && typeof v.forkTurn === 'number';
+    for (let j = 0; j < list.length; j++) {
+      if (j > 0) {
+        list[j].parentId = list[j - 1].id;
+        continue;
+      }
+      if (v.parentSessionId === undefined) {
+        list[j].parentId = rootNodeId;
+        continue;
+      }
+      // A version's first node hangs off the nearest node its parent actually
+      // has at or before the turn it forked from; the root is the last resort.
+      const attachTurn = isFork ? v.forkTurn : (typeof v.targetTurn === 'number' ? v.targetTurn - 1 : 0);
+      const parent = nearestNodeAt(v.parentSessionId, attachTurn);
+      list[j].parentId = parent === null ? rootNodeId : parent.id;
     }
   }
 
@@ -1856,6 +1858,10 @@ return {
               key: n.id,
               className: 'mtx-card',
               'data-id': n.id,
+              // The node this one hangs from, in the open: a broken parent link
+              // is what turns the tree into a pile of cards, and the layout test
+              // asserts on this attribute directly.
+              'data-parent': n.parentId || undefined,
               'data-current': n.current || undefined,
               'data-path': n.onCurrentPath || undefined,
               'data-deleted': n.deleted || undefined,

@@ -21,7 +21,7 @@ const VERSIONS = [
   { sessionId: 'session-fork', parentSessionId: 'session-root', createdAt: 3, forkTurn: 15, turns: FORK_TURNS },
 ];
 
-async function mountView(t, prefs) {
+async function mountView(t, prefs, versions = VERSIONS) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
     url: 'https://tree-view.test/',
     pretendToBeVisual: true,
@@ -29,7 +29,7 @@ async function mountView(t, prefs) {
   dom.window.localStorage.setItem('dsh-tree-view:prefs', JSON.stringify(Object.assign({
     rememberPath: true, stopOnEdit: true, dropEmptyForks: true,
   }, prefs)));
-  dom.window.fetch = async () => ({ ok: true, json: async () => ({ versions: VERSIONS }) });
+  dom.window.fetch = async () => ({ ok: true, json: async () => ({ versions }) });
   const previous = new Map();
   const browserErrors = [];
   dom.window.addEventListener('error', (event) => browserErrors.push(event.error || event.message));
@@ -72,7 +72,7 @@ async function mountView(t, prefs) {
           open: () => {},
           list: {
             subscribe: () => () => {},
-            getSnapshot: () => ({ byId: Object.fromEntries(VERSIONS.map((v) => [v.sessionId, { id: v.sessionId }])) }),
+            getSnapshot: () => ({ byId: Object.fromEntries(versions.map((v) => [v.sessionId, { id: v.sessionId }])) }),
           },
         };
       }
@@ -86,7 +86,9 @@ async function mountView(t, prefs) {
   const cardIds = () => [...dom.window.document.querySelectorAll('.mtx-card')].map((el) => el.getAttribute('data-id'));
   const offsets = () => [...dom.window.document.querySelectorAll('.mtx-card')].map((el) => el.style.transform);
   const titles = () => [...dom.window.document.querySelectorAll('.mtx-card-title')].map((el) => el.textContent);
-  return { dom, cardIds, offsets, titles };
+  const links = () => [...dom.window.document.querySelectorAll('.mtx-card')]
+    .map((el) => ({ id: el.getAttribute('data-id'), parent: el.getAttribute('data-parent') }));
+  return { dom, cardIds, offsets, titles, links };
 }
 
 test('the switch decides whether a photocopy is drawn, and the layout stays sane', async (t) => {
@@ -115,4 +117,49 @@ test('with the switch off, a photocopy is drawn as one copy node', async (t) => 
   for (const offset of shown.offsets()) {
     assert.ok(!/NaN|undefined/.test(offset), 'every card is placed: ' + offset);
   }
+});
+
+// Turn numbers are not contiguous in real logs: a turn that was interrupted or
+// steered into never writes its turn/end, so a conversation can count 18 turns
+// while numbering them 1..12 and 14..19. Both reported "turn N should come after
+// turn N-2" cases came from chaining on `turn - 1` and falling back to the root
+// when that invented node turned out not to exist.
+const GAPPED_VERSIONS = [
+  {
+    sessionId: 'session-root',
+    createdAt: 1,
+    current: true,
+    turns: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19].map((turn) => ({ turn, text: 'root ' + turn, time: turn })),
+  },
+  {
+    sessionId: 'session-gap-fork',
+    parentSessionId: 'session-root',
+    createdAt: 2,
+    forkTurn: 15,
+    turns: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20].map((turn) => ({ turn, text: 'fork ' + turn, time: turn })),
+  },
+];
+
+test('a gap in the turn numbering does not orphan the chain', async (t) => {
+  const shown = await mountView(t, { dropEmptyForks: true }, GAPPED_VERSIONS);
+  const links = shown.links();
+  const parentOf = (id) => (links.find((link) => link.id === id) || {}).parent;
+
+  assert.equal(parentOf('session-root#t14'), 'session-root#t12',
+    'turn 14 follows turn 12 — the turn that actually exists before it');
+  assert.equal(parentOf('session-root#t15'), 'session-root#t14');
+  assert.equal(parentOf('session-gap-fork#t16'), 'session-root#t15',
+    'a fork starts on the turn it forked from, not on the root');
+  assert.equal(parentOf('session-gap-fork#t20'), 'session-gap-fork#t18',
+    'and turn 20 follows turn 18, not the root');
+
+  const ids = new Set(links.map((link) => link.id));
+  for (const link of links) {
+    if (!link.parent) continue;
+    assert.ok(link.parent === 'session-root#root' || ids.has(link.parent),
+      'no dangling parent: ' + link.id + ' -> ' + link.parent);
+  }
+  assert.deepEqual(links.filter((link) => link.parent === 'session-root#root').map((link) => link.id),
+    ['session-root#t1'],
+    'only the conversation\'s own first turn hangs off the root — the fork hangs off turn 15');
 });
