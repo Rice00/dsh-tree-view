@@ -422,6 +422,39 @@ test('a long run on one branch folds too, not only the shared history', async (t
   assert.ok(view.cardIds().includes('session-root#t1'), 'the short shared run stays drawn throughout');
 });
 
+test('clicking another node collects the version you were reading', async (t) => {
+  // Reported: clicking a node never put the previous one away. The switch used to
+  // hang off the chat view's session transition, which is not happening while the
+  // Tree tab is in front — so the flow it exists for never fired.
+  const posts = [];
+  const view = await mountView(t, { dropEmptyForks: true, autoCollectPrevious: true }, VERSIONS,
+    async (url, options) => {
+      if (options && options.method === 'POST') {
+        posts.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      return { ok: true, json: async () => ({ versions: VERSIONS }) };
+    }, 'session-fork');
+
+  await view.clickCard('session-root#root');
+  assert.deepEqual(posts, [{ action: 'demote', sessionId: 'session-fork' }],
+    'the version the tree was showing goes back into the tree');
+});
+
+test('and collects nothing while the switch is off', async (t) => {
+  const posts = [];
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, async (url, options) => {
+    if (options && options.method === 'POST') {
+      posts.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    return { ok: true, json: async () => ({ versions: VERSIONS }) };
+  }, 'session-fork');
+
+  await view.clickCard('session-root#root');
+  assert.deepEqual(posts, [], 'off by default: nothing is archived by a click');
+});
+
 test('a family with nothing worth folding keeps the control out of the way', async (t) => {
   // Two turns and no branches: the only thing a fold could hide is one turn,
   // which trades a card for a card.

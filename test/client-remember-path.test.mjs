@@ -276,13 +276,13 @@ test('with the switch on, the branch you leave is collected', async (t) => {
     'the branch you left went back into the tree');
 });
 
-test('the conversation itself is never collected', async (t) => {
+test('the entry moves with you: the conversation is collected like any other', async (t) => {
   const chat = await mountChat(t, { prefs: collectOn });
 
   await chat.render('session-root');
   await chat.render('session-branch');
-  assert.deepEqual(bodies(chat), [],
-    'leaving the conversation must not archive it — that entry is the family itself');
+  assert.deepEqual(bodies(chat), [{ action: 'demote', sessionId: 'session-root' }],
+    'one entry per conversation means the entry follows the version you open — and that version is never the one collected');
 });
 
 test('a branch that is still generating a reply is left alone', async (t) => {

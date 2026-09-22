@@ -495,6 +495,39 @@ async function openVersionTarget(sessions, v) {
   openWhenListed(sessions, v.sessionId);
 }
 
+/**
+ * Put the version you leave back into the tree, when the setting asks for it, so
+ * a conversation keeps one sidebar entry.
+ *
+ * Called wherever a switch actually happens — a click in the tree, the ‹ › ring,
+ * or the app moving you between two versions. It used to hang off the chat view's
+ * session transition alone, and that transition is invisible while the Tree tab is
+ * in front, which is exactly where those clicks come from: the switch never fired
+ * for the flow it exists for.
+ *
+ * The version being opened is never collected, an archived one has nothing left
+ * to collect, and one that is still generating a reply is left alone — archiving
+ * mid-turn would hide work that is still arriving. The conversation itself is fair
+ * game: the entry you leave moves to the version you open, and there is always one
+ * because the version you are reading is never the one collected.
+ */
+function collectLeftVersion(sessions, left, target, versions) {
+  if (!prefsStore.get().autoCollectPrevious) return;
+  if (!left || left === target) return;
+  const list = versions || [];
+  const entry = list.find(function (v) { return v.sessionId === left; });
+  if (!entry || entry.archived || entry.deleted || entry.running === true) return;
+  // Only ever inside one family: leaving a conversation for another one is not a
+  // branch switch.
+  if (rootOf(list, left) !== rootOf(list, target)) return;
+  mutate({ action: 'demote', sessionId: left })
+    .then(function () { treeStore.load(target); })
+    .catch(function (error) {
+      // Nothing to recover from: the version simply stays where it is.
+      console.warn('[dsh-tree-view] could not collect the version you left:', error && error.message);
+    });
+}
+
 function openWhenListed(sessions, sessionId) {
   const list = sessions.list;
   if (!list || typeof list.getSnapshot !== 'function') { sessions.open(sessionId); return; }
@@ -1260,8 +1293,8 @@ return {
         foldSharedHint: 'The turns every branch has in common, and any unbranched run a single branch continues on, are drawn as one node once that many of them are hidden. Click that node (or the toolbar button) to unfold them again. "Never" leaves them drawn; the toolbar can still fold them by hand.',
         foldSharedOff: 'Never',
         foldSharedAt: '{count} or more turns',
-        autoCollectLabel: 'Put the branch I leave back into the tree',
-        autoCollectHint: 'Switching to another branch of the same conversation collects the one you were reading, so the sidebar keeps one entry per conversation. Never touches the conversation itself, never the branch you are opening, and skips a branch that is still generating a reply. Off by default.',
+        autoCollectLabel: 'Put the version I leave back into the tree',
+        autoCollectHint: 'Switching to another version of the same conversation collects the one you were reading — by clicking a node in the tree, by the ‹ › ring, or when the app moves you — so the sidebar keeps one entry per conversation. The version you open is never collected, so that entry always exists; a version that is still generating a reply is skipped. Off by default.',
         collectOthers: 'Collect every other branch',
         collectRunning: 'Running branches: {count}. Stop them and collect them into the tree?',
         collectStop: 'Confirm',
@@ -1329,8 +1362,8 @@ return {
         foldSharedHint: '「每个分支都一样的开头」以及「一条分支一路直下、中途没有分叉的连续轮次」，隐藏轮数达到这个值时折成一个节点。点那个节点（或工具栏的折叠按钮）即可展开。选「永不」则一直画全；工具栏仍可手动折叠。',
         foldSharedOff: '永不',
         foldSharedAt: '{count} 轮及以上',
-        autoCollectLabel: '切换分支时自动收起上一个',
-        autoCollectHint: '切到同一对话的另一条分支时，把你刚离开的那条收进 Tree 里，让侧栏每个对话只留一个条目。不会动对话本身、不会动你正要打开的那条，正在生成回复的分支会被跳过。默认关闭。',
+        autoCollectLabel: '切换时收起我离开的那条',
+        autoCollectHint: '切到同一对话的另一条版本时，把你刚在看的收进 Tree —— 在树里点节点、用气泡下的 ‹ › 环、或应用自己把你切过去，都算。你正要打开的那条永远不会被收（所以侧栏始终有入口）；正在生成回复的那条会被跳过。默认关闭。',
         collectOthers: '收起其它分支',
         collectRunning: '有 {count} 个分支正在运行，要结束并归档收起吗？',
         collectStop: '确认',
@@ -1457,7 +1490,9 @@ return {
       if (!ring) return null;
       const go = function (delta) {
         const next = ring.alternatives[ring.index + delta];
-        if (next) openVersionTarget(sessions, next);
+        if (!next) return;
+        collectLeftVersion(sessions, props.sessionId, next.sessionId, props.versions);
+        openVersionTarget(sessions, next);
       };
       return React.createElement('div', { className: 'mtx-ring' },
         React.createElement('button', {
@@ -1502,23 +1537,11 @@ return {
         if (!root) return;
         const arrivedFrom = lastViewedSessionId;
         lastViewedSessionId = sessionId;
-        // Switching to another version of the same conversation can put the one
-        // you leave back into the tree, so the sidebar keeps one entry per
-        // conversation. Only a version inside this family, never the
-        // conversation itself, and never one that is still generating a reply —
-        // archiving mid-turn would hide work that is still arriving. Off by
-        // default; the switch is in Settings.
-        if (prefs.autoCollectPrevious && arrivedFrom !== undefined && arrivedFrom !== sessionId
-          && arrivedFrom !== root && rootOf(versions, arrivedFrom) === root) {
-          const left = versions.find(function (v) { return v.sessionId === arrivedFrom; });
-          if (left && !left.archived && !left.deleted && left.running !== true) {
-            mutate({ action: 'demote', sessionId: arrivedFrom })
-              .then(function () { treeStore.load(sessionId); })
-              .catch(function (error) {
-                // Nothing to recover from: the branch simply stays where it is.
-                console.warn('[dsh-tree-view] could not collect the branch you left:', error && error.message);
-              });
-          }
+        // The app moving you between two versions of one conversation is a branch
+        // switch like any other, so it collects the one you leave when the
+        // setting asks for it.
+        if (arrivedFrom !== undefined && arrivedFrom !== sessionId) {
+          collectLeftVersion(sessions, arrivedFrom, sessionId, versions);
         }
         if (sessionId !== root) {
           // Arrived at a branch: that is now the remembered view, and any
@@ -1731,7 +1754,7 @@ return {
         // The controls sit under the bubble in all three references. Which
         // ones exist, and whether they wait for hover, is what differs.
         React.createElement('div', { className: 'mtx-actions' },
-          React.createElement(VersionRing, { ring: ring }),
+          React.createElement(VersionRing, { ring: ring, sessionId: sessionId, versions: versions }),
           React.createElement('button', {
             type: 'button', className: 'mtx-act', 'data-act': 'retry',
             title: t('retry'), disabled: !canEdit || busy, onClick: retry,
@@ -2039,6 +2062,9 @@ return {
         if (!sessions) return;
         const v = versions.find(function (item) { return item.sessionId === node.sessionId; });
         if (!v) return;
+        // The switch the setting is about, at the moment it happens: opening
+        // another version puts the one you were reading back into the tree.
+        collectLeftVersion(sessions, sessionId, v.sessionId, versions);
         openVersionTarget(sessions, v);
         showChat();
         if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
