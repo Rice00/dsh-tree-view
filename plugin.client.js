@@ -543,6 +543,7 @@ function buildTurnTree(versions, currentSessionId) {
     onCurrentPath: true,
     deleted: !!rootVersion.deleted,
     archived: !!rootVersion.archived,
+    versionLabel: rootVersion.label || undefined,
   };
   nodes.push(rootNode);
   nodeMap.set(rootNodeId, rootNode);
@@ -604,6 +605,7 @@ function buildTurnTree(versions, currentSessionId) {
           onCurrentPath: false,
           deleted: !!v.deleted,
           archived: !!v.archived,
+          versionLabel: v.label || undefined,
         };
         nodes.push(node);
         nodeMap.set(turnNodeId, node);
@@ -626,6 +628,9 @@ function buildTurnTree(versions, currentSessionId) {
             onCurrentPath: false,
             deleted: !!v.deleted,
             archived: !!v.archived,
+            // A version's name belongs on the node where that version begins —
+            // its fork point — not on every turn the version later grows.
+            versionLabel: isForkTurn ? (v.label || undefined) : undefined,
           };
           nodes.push(node);
           nodeMap.set(turnNodeId, node);
@@ -793,6 +798,7 @@ const CSS = [
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px rgba(0,0,0,.3);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
+  '.mtx-card[data-labeled] .mtx-card-title{color:var(--dsw-alias-accent-primary,#4b8dff)}',
   '.mtx-card[data-deleted]:hover{box-shadow:0 2px 10px rgba(0,0,0,.14);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent)}',
   '.mtx-card-icon{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:12px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 18%,transparent);color:var(--dsw-alias-label-secondary,#bbb)}',
   '.mtx-card[data-path] .mtx-card-icon{background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 20%,transparent);color:var(--dsw-alias-accent-primary,#4b8dff)}',
@@ -924,6 +930,10 @@ return {
         rememberPathHint: 'Reopening a conversation returns to the branch you last had open instead of the original. Off means it always opens the first version.',
         stopOnEditLabel: 'Stop the running reply when I edit',
         stopOnEditHint: 'Editing or retrying cancels every reply still being generated in this conversation before branching, including other versions, so no superseded answer keeps spending tokens. This also lets you edit mid-reply. Off leaves them running.',
+        renamePrompt: 'Rename this branch',
+        renameHint: 'Right-click to rename this branch',
+        renameEmptyHint: 'Leave it empty to clear the name',
+        renameFailed: 'Rename failed: {message}',
         previewUser: 'Rewrite this paragraph to be more concise.',
       },
       zh: {
@@ -960,6 +970,10 @@ return {
         rememberPathHint: '重新打开会话时回到上次查看的分支，而不是最初那条。关闭后始终打开第一个版本。',
         stopOnEditLabel: '编辑时中止正在生成的回复',
         stopOnEditHint: '编辑或重试时，先取消该会话中所有仍在生成的回复（包括其它版本）再分支，避免被取代的回答继续消耗额度；同时允许在回复过程中直接编辑。关闭后它们会继续跑完。',
+        renamePrompt: '重命名这个分支',
+        renameHint: '右键重命名该分支',
+        renameEmptyHint: '留空即清除名字',
+        renameFailed: '重命名失败：{message}',
         previewUser: '把这段话改写得更简洁一些。',
       },
     };
@@ -1272,6 +1286,9 @@ return {
       const worldRef = React.useRef(null);
       const cardEls = React.useRef(new Map());
       const edgeEls = React.useRef(new Map());
+      const renameErrorState = React.useState(null);
+      const renameError = renameErrorState[0];
+      const setRenameError = renameErrorState[1];
       const springs = React.useRef(new Map());
       const layoutRef = React.useRef(null);
       const viewRef = React.useRef({ x: 60, y: 42, scale: 1 });
@@ -1423,6 +1440,30 @@ return {
         if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
       }
 
+      /**
+       * Rename the branch a node belongs to. This writes our sidecar through
+       * the host route and nothing else: the session's own title in the sidebar
+       * stays host-owned, which is the split the user asked for. Clearing the
+       * text removes the name again.
+       */
+      function renameVersion(n) {
+        if (n.deleted) return;
+        const g = realGlobal();
+        const current = n.versionLabel || '';
+        const next = g && typeof g.prompt === 'function'
+          ? g.prompt(t('renamePrompt') + '（' + t('renameEmptyHint') + '）', current)
+          : null;
+        if (next === null || next === undefined) return;
+        setRenameError(null);
+        mutate({ action: 'label', sessionId: n.sessionId, label: String(next) })
+          .then(function () { treeStore.load(sessionId); })
+          .catch(function (error) {
+            const message = error && error.message ? error.message : String(error);
+            setRenameError(t('renameFailed', { message: message }));
+            console.warn('[dsh-tree-view] branch rename failed', error);
+          });
+      }
+
       function onPointerDown(ev) {
         if (ev.button !== 0) return;
         const cardEl = ev.target.closest ? ev.target.closest('.mtx-card') : null;
@@ -1507,7 +1548,12 @@ return {
           layout.nodes.map(function (n) {
             const s = springs.current.get(n.id) || layout.pos.get(n.id) || { x: 0, y: 0 };
             const summary = titles[n.sessionId];
-            const sub = (n.archived ? t('archivedTag') + ' · ' : '')
+            // A named branch shows that name as its title, and demotes the
+            // derived "edited turn 3" text into the sub line where it stays
+            // readable instead of being lost.
+            const derivedTitle = cardTitle(n);
+            const sub = (n.versionLabel ? derivedTitle + ' · ' : '')
+              + (n.archived ? t('archivedTag') + ' · ' : '')
               + (n.text ? '“' + clip(n.text, 44) + '” · ' : '')
               + (n.isRoot && !n.text && summary && summary.displayTitle ? clip(summary.displayTitle, 24) + ' · ' : '')
               + timeLabel(n.time);
@@ -1519,13 +1565,20 @@ return {
               'data-path': n.onCurrentPath || undefined,
               'data-deleted': n.deleted || undefined,
               'data-archived': n.archived || undefined,
+              'data-labeled': n.versionLabel ? '' : undefined,
+              title: n.deleted ? undefined : t('renameHint'),
+              onContextMenu: function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                renameVersion(n);
+              },
               style: { transform: 'translate(' + (s.x - CARD_W / 2) + 'px,' + s.y + 'px)' },
               ref: function (el) { if (el) cardEls.current.set(n.id, el); else cardEls.current.delete(n.id); },
             },
               React.createElement('span', { className: 'mtx-card-icon' },
                 n.deleted ? '∅' : n.isRoot ? '●' : (n.operation === 'retry' ? '↻' : (n.operation === 'edit' ? '✎' : '💬'))),
               React.createElement('span', { className: 'mtx-card-main' },
-                React.createElement('span', { className: 'mtx-card-title' }, cardTitle(n)),
+                React.createElement('span', { className: 'mtx-card-title' }, n.versionLabel || derivedTitle),
                 React.createElement('span', { className: 'mtx-card-sub' }, sub)
               )
             );
@@ -1542,6 +1595,7 @@ return {
           }, '↻')
         ),
         tree && tree.error ? React.createElement('div', { className: 'mtx-error' }, tree.error) : null,
+        renameError ? React.createElement('div', { className: 'mtx-error' }, renameError) : null,
         turnNodes.length <= 1 ? React.createElement('div', { className: 'mtx-empty' }, t('empty')) : null,
         React.createElement('a', {
           className: 'mtx-link',
