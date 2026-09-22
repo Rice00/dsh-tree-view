@@ -972,9 +972,11 @@ const CSS = [
   '.mtx-tool{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:var(--dsw-alias-bg-primary,rgba(30,30,34,.85));color:var(--dsw-alias-label-secondary,#bbb);cursor:pointer;font-size:14px}',
   '.mtx-tool:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
   '.mtx-tool[data-on]{color:var(--dsw-alias-accent-primary,#4b8dff);border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 55%,transparent);background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 14%,transparent)}',
-  '.mtx-confirm{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);z-index:10;max-width:330px;padding:14px 16px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--dsw-alias-bg-primary,#1e1e22);box-shadow:0 14px 40px rgba(0,0,0,.4)}',
-  '.mtx-confirm-title{font-size:12.5px;line-height:19px;color:var(--dsw-alias-label-primary,#eee)}',
-  '.mtx-confirm-actions{display:flex;gap:8px;margin-top:12px}',
+  '.mtx-confirm{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);z-index:10;width:min(460px,calc(100% - 40px));box-sizing:border-box;padding:22px 24px;border-radius:15px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--dsw-alias-bg-primary,#1e1e22);box-shadow:0 18px 50px rgba(0,0,0,.46)}',
+  '.mtx-confirm-title{font-size:15px;line-height:23px;color:var(--dsw-alias-label-primary,#eee)}',
+  '.mtx-confirm-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}',
+  '.mtx-confirm .mtx-btn{font-size:13.5px;padding:9px 20px;border-radius:10px}',
+  '.mtx-confirm .mtx-btn-primary{background:var(--dsw-alias-accent-primary,#4b8dff);border-color:transparent;color:#fff}',
   '.mtx-btn{appearance:none;font-family:inherit;font-size:12px;padding:6px 12px;border-radius:9px;cursor:pointer;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:transparent;color:var(--dsw-alias-label-primary,#eee)}',
   '.mtx-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08))}',
   '.mtx-btn-primary{border-color:var(--dsw-alias-accent-primary,#4b8dff);color:var(--dsw-alias-accent-primary,#4b8dff)}',
@@ -1111,8 +1113,8 @@ return {
         dropForksLabel: 'Hide content-less forks',
         dropForksHint: 'A fork that only copied this conversation is not drawn.',
         collectOthers: 'Collect every other branch',
-        collectRunning: '{count} branch(es) are still running a task.',
-        collectStop: 'Stop and collect',
+        collectRunning: 'Running branches: {count}. Stop them and collect them into the tree?',
+        collectStop: 'Confirm',
         collectFailed: 'Collect failed: {message}',
         runningTag: 'running',
         archiveUnavailable: 'This build cannot do that yet — see the note in the panel',
@@ -1168,8 +1170,8 @@ return {
         dropForksLabel: '剔除空 Fork',
         dropForksHint: '只复制了本对话、自己没聊出新内容的 Fork 不画出来。',
         collectOthers: '收起其它分支',
-        collectRunning: '有 {count} 个分支正在跑任务。',
-        collectStop: '中止任务并收起',
+        collectRunning: '有 {count} 个分支正在运行，要结束并归档收起吗？',
+        collectStop: '确认',
         collectFailed: '收起失败：{message}',
         runningTag: '运行中',
         archiveUnavailable: '此 DSH 版本还不支持这个操作，面板上有说明',
@@ -1964,7 +1966,11 @@ return {
       function onPointerDown(ev) {
         if (ev.button !== 0) return;
         const cardEl = ev.target.closest ? ev.target.closest('.mtx-card') : null;
-        if (ev.target.closest && ev.target.closest('.mtx-tool,.mtx-link,.mtx-rename,.mtx-menu')) return;
+        // Anything that is not the canvas itself. A press here used to start a
+        // pan and capture the pointer on the graph, which retargets the click
+        // that follows to the graph — so the dialog's buttons received no click
+        // at all and Cancel looked dead. Overlays belong on this list.
+        if (ev.target.closest && ev.target.closest('.mtx-tool,.mtx-link,.mtx-rename,.mtx-menu,.mtx-confirm')) return;
         if (cardEl) {
           // A press on a node only selects it: nodes stay where the layout put
           // them. Dragging them around was a way to lose the shape of a branch,

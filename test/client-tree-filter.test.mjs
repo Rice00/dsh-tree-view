@@ -104,7 +104,23 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     assert.ok(button, 'confirm button ' + label + ' exists');
     button.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   });
-  return { dom, cardIds, offsets, titles, links, tools, clickTool, confirmTitle, confirmButtons, clickConfirm };
+  // A real press is pointerdown → pointerup → click. The canvas pans on the
+  // first of those and captures the pointer, so an overlay that the pan handler
+  // does not recognise never receives the click at all — which is exactly how
+  // Cancel came to do nothing.
+  const pressDown = (selector) => act(async () => {
+    const el = dom.window.document.querySelector(selector);
+    assert.ok(el, 'element ' + selector + ' exists');
+    el.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }));
+  });
+  const graphsPanning = () => {
+    const graph = dom.window.document.querySelector('.mtx-graph');
+    return !!graph && graph.hasAttribute('data-panning');
+  };
+  return {
+    dom, cardIds, offsets, titles, links, tools, clickTool,
+    confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
+  };
 }
 
 test('the switch decides whether a photocopy is drawn, and the layout stays sane', async (t) => {
@@ -183,11 +199,38 @@ test('the toolbar says what it does in a line, and asks before stopping work', a
   assert.ok(posts.some((p) => p.action === 'demoteOthers'), 'collect asks the host');
   assert.ok(!posts.some((p) => p.stopRunning === true), 'and does not stop anything before the user says so');
   assert.ok(view.confirmTitle() !== null, 'a running branch is a question, not a silent kill');
-  assert.deepEqual(view.confirmButtons(), ['Stop and collect', 'Cancel']);
+  assert.ok(/^Running branches: 1[.]/.test(view.confirmTitle()), 'the question counts the running branches: ' + view.confirmTitle());
+  assert.deepEqual(view.confirmButtons(), ['Confirm', 'Cancel']);
 
-  await view.clickConfirm('Stop and collect');
+  await view.clickConfirm('Confirm');
   assert.ok(posts.some((p) => p.action === 'demoteOthers' && p.stopRunning === true), 'confirmed, it stops and collects');
   assert.equal(view.confirmTitle(), null, 'and the question goes away');
+});
+
+test('the question can be dismissed, and its buttons are not drag handles', async (t) => {
+  // Reported: Cancel did nothing. The canvas pans on pointerdown and captures
+  // the pointer, which retargets the click that follows to the canvas — so a
+  // press on the dialog has to be excluded from the pan handler, or neither
+  // button ever receives a click.
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, async (url, options) => {
+    if (options && options.method === 'POST') {
+      return { ok: false, status: 409, json: async () => ({ error: 'busy', busy: ['session-fork', 'session-copy'] }) };
+    }
+    return { ok: true, json: async () => ({ versions: VERSIONS }) };
+  });
+
+  await view.clickTool(1);
+  assert.ok(/^Running branches: 2[.]/.test(view.confirmTitle()), 'both running branches are named: ' + view.confirmTitle());
+
+  await view.pressDown('.mtx-confirm-title');
+  assert.equal(view.graphsPanning(), false, 'the dialog body is excluded from panning too');
+  assert.ok(view.confirmTitle() !== null, 'and the press alone leaves the question standing');
+
+  await view.pressDown('.mtx-confirm .mtx-btn:last-child');
+  assert.equal(view.graphsPanning(), false, 'pressing Cancel must not start a pan under the dialog');
+
+  await view.clickConfirm('Cancel');
+  assert.equal(view.confirmTitle(), null, 'Cancel closes the question');
 });
 
 test('a host that cannot hide sessions turns those controls off and says so', async (t) => {
