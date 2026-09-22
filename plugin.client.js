@@ -1110,18 +1110,16 @@ const CSS = [
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px rgba(0,0,0,.3);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
-  // A folded stretch is not a turn, and it must not read like one: a squarer,
-  // single-line bar with two thin plates peeking out of its right edge — a stack
-  // of turns with the top one labelled — and a chevron saying that it opens. No
-  // dashes: a fold is not a broken link, it is turns with the lid on. Everything
-  // takes its colour from `currentColor`, so an accent fold stays accent and the
-  // neutral one stays neutral.
-  '.mtx-card[data-fold]{width:176px;padding:7px 12px;border-radius:9px;border:1px solid color-mix(in srgb,currentColor 42%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 13%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));color:var(--dsw-alias-label-secondary,#bbb);align-items:center;gap:8px}',
+  // A folded stretch is not a turn: it is a stack of them. Three sheets offset
+  // down-right, the top one labelled, one line of text, and a chevron saying that
+  // it opens — chosen from the candidates for reading as a stack even when the
+  // canvas is zoomed out. Taller than a bar on purpose, so it holds its own next
+  // to a turn card. Everything takes its colour from `currentColor`, so an accent
+  // fold on the line you are reading stays accent and the rest stay neutral.
+  '.mtx-card[data-fold]{width:176px;padding:15px 14px;border-radius:11px;border:1px solid color-mix(in srgb,currentColor 48%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 15%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));color:var(--dsw-alias-label-secondary,#bbb);box-shadow:7px 7px 0 -1px var(--dsw-alias-bg-primary,#1e1e22),7px 7px 0 0 color-mix(in srgb,currentColor 55%,transparent),14px 14px 0 -2px var(--dsw-alias-bg-primary,#1e1e22),14px 14px 0 -1px color-mix(in srgb,currentColor 32%,transparent);align-items:center;gap:8px}',
   '.mtx-card[data-fold][data-current]{color:var(--dsw-alias-accent-primary,#4b8dff)}',
   '.mtx-card[data-fold] .mtx-card-icon{width:auto;height:auto;background:transparent;color:inherit;font-size:13px;letter-spacing:.08em}',
-  '.mtx-card[data-fold] .mtx-card-title{font-size:12px;line-height:17px;color:inherit;font-weight:600}',
-  '.mtx-fold-plate{position:absolute;top:4px;bottom:4px;right:-8px;width:8px;border:1px solid color-mix(in srgb,currentColor 58%,transparent);border-left:0;border-radius:0 9px 9px 0;background:inherit}',
-  '.mtx-fold-plate[data-plate="2"]{top:9px;bottom:9px;right:-15px;width:7px;border-color:color-mix(in srgb,currentColor 40%,transparent)}',
+  '.mtx-card[data-fold] .mtx-card-title{font-size:12.5px;line-height:18px;color:inherit;font-weight:600}',
   '.mtx-fold-cue{margin-left:auto;flex:none;font-size:12px;line-height:1;color:inherit;opacity:.7}',
   '.mtx-card[data-labeled] .mtx-card-title{color:var(--dsw-alias-accent-primary,#4b8dff)}',
   '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 7%,transparent);z-index:0;pointer-events:none}',
@@ -2364,10 +2362,6 @@ return {
                 // shape. Every other node keeps its subtitle.
                 n.fold ? null : React.createElement('span', { className: 'mtx-card-sub' }, sub)
               ),
-              // The plates are what say "several turns live here": two thin
-              // sheets peeking out from behind the labelled one.
-              n.fold ? React.createElement('span', { className: 'mtx-fold-plate', 'data-plate': '1' }) : null,
-              n.fold ? React.createElement('span', { className: 'mtx-fold-plate', 'data-plate': '2' }) : null,
               n.fold ? React.createElement('span', { className: 'mtx-fold-cue' }, '⌄') : null
             );
           }),

@@ -108,10 +108,11 @@ hidden inside a fold.
   which only expands and re-folds what the setting already allows — a control that folded
   shorter runs than the setting was folding three-turn runs out of nowhere. `foldModes`
   remembers "expanded" per family for the page.
-- How it is drawn: a squarer, single-line bar with two thin plates peeking out of its right
-  edge (a stack of turns with the top one labelled) and a chevron saying it opens. Solid
-  border, no dashes — a fold is not a broken link. Colour comes from `currentColor`, so an
-  accent fold on the line you are reading stays accent and the rest stay neutral.
+- How it is drawn: three sheets offset down-right — a stack of turns with the top one
+  labelled — one line of text, a chevron saying it opens, and a box taller than a bar so it
+  holds its own beside a turn card. Solid border, no dashes: a fold is not a broken link.
+  Colour comes from `currentColor`, so an accent fold on the line you are reading stays
+  accent and the rest stay neutral.
 - Folding is a client-side view decision, not a data change: `buildTurnTree` still returns
   the full tree, and `foldLongRuns(nodes, threshold)` is applied on top of it.
 
