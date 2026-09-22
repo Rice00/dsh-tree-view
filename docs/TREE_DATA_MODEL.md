@@ -80,24 +80,35 @@ Calculates the `‹ n/m ›` counter under a message at `turn` while viewing `se
 - Filters out deleted/ghost sessions (renumbering over surviving versions).
 - Returns `{ alternatives, index }`. If fewer than 2 alternatives exist, returns `null` (counter is hidden).
 
-### 2.6 Shared-History Folding (`foldSharedHistory`)
+### 2.6 Long-Stretch Folding (`foldLongRuns`)
 *Location: [`plugin.client.js`](../plugin.client.js)*
 
-A deep family can spend most of its canvas on the stretch every branch has in common.
-Walking down from `${rootSessionId}#root`, every node with **exactly one child** is such a
-turn; the first node with two or more children is where the branches actually part.
+A deep family can spend most of its canvas on turns that decide nothing. A turn with
+**exactly one child** is a pass-through: the line simply continues. A run of them can be
+hundreds of world units long, and there are two kinds:
 
-- The hidden stretch is everything between the origin and that branch point. Both ends stay
-  drawn: the origin (`#root`) and the branch point (where the eye needs to land).
-- The hidden turns are replaced by one synthetic node, `id = <origin>#fold`, carrying
-  `fold: true` and `foldCount`. Its parent is the origin, and the branch point is re-parented
-  onto it — so the chain stays connected and no card is orphaned into its own root.
-- Because every hidden node has exactly one child by construction, no other node can hang off
-  a hidden one; the fold cannot create a dangling parent.
-- The fold node inherits `current` / `onCurrentPath` only when **all** the turns it hides are
-  on that line, so "the line you are reading" keeps reading the same.
-- Folding is a client-side view decision, not a data change: `buildTurnTree` still returns the
-  full tree, and `foldSharedHistory(fullNodes, 2)` is applied on top of it.
+- the **shared history** above the first fork (every branch below still contains it), and
+- the **unbranched run** any single branch continues on afterwards.
+
+Both fold. A run is bordered by the nodes that do matter, and those always stay drawn:
+the origin (`#root`), where the branches part (two or more children), where the line ends,
+and the latest turn of the session being read — so the place you are adding to is never
+hidden inside a fold.
+
+- Each run is replaced by one synthetic node, `id = <first hidden turn>#fold`, carrying
+  `fold: true`, `foldCount`, `foldShared` (true only for the origin's own run) and the
+  turn range it hides. Its parent is the turn *before* the run, and the run's exit
+  re-parents onto it, so the chain stays connected and no card is orphaned into its own root.
+- Because every hidden node has exactly one child by construction, no other node can hang
+  off a hidden one; a fold cannot create a dangling parent.
+- A fold inherits `current` / `onCurrentPath` only when **all** the turns it hides are on
+  that line, so "the line you are reading" keeps reading as one line.
+- The threshold is **per run** (`foldSharedAt`, default 8 hidden turns; 0 disables it), so a
+  short run next to a long one stays drawn. The toolbar control ignores the threshold and
+  folds every run worth folding (two turns or more), which is also how an automatic fold is
+  undone; `foldModes` remembers that choice per family for the page.
+- Folding is a client-side view decision, not a data change: `buildTurnTree` still returns
+  the full tree, and `foldLongRuns(nodes, threshold)` is applied on top of it.
 
 ---
 

@@ -21,7 +21,7 @@ Edit a message you already sent and the conversation **rewinds and branches** fr
 | **Hide content-less forks** switch (forks that only copied the conversation) | done |
 | **Shared turns merged**: a fork's copied turns are the same nodes as its parent's | done |
 | **Capability probe + archive adapter** (degrade loudly, never silently) | done |
-| **Shared-history folding**: the stretch every branch has in common folds into one node past a threshold and opens again when clicked (the toolbar folds and unfolds it too) | done |
+| **Long-stretch folding**: the stretch every branch has in common, and any unbranched run a single branch continues on, fold into one node past a threshold and open again when clicked (the toolbar folds and unfolds by hand too; the threshold counts each run on its own) | done |
 | **Collect the branch you leave** when you switch branches (off by default, a switch in Settings; never the conversation itself, and a reply that is still generating is skipped) | done |
 | A truncated "last N turns" view | open |
 

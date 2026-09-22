@@ -374,6 +374,52 @@ test('a trunk shorter than the threshold stays drawn, and can still be folded by
   assert.ok(!view.cardIds().includes('session-root#t5'));
 });
 
+test('a long run on one branch folds too, not only the shared history', async (t) => {
+  // 30 turns on the conversation with one small fork at turn 5: the shared
+  // history is turns 1..4, and turns 6..29 are the unbranched run that only this
+  // line continues on. Neither of them decides anything, so both fold.
+  const longLine = [
+    {
+      sessionId: 'session-root',
+      createdAt: 1,
+      current: true,
+      turns: Array.from({ length: 30 }, (_, i) => ({ turn: i + 1, text: 'root ' + (i + 1), time: i + 1 })),
+    },
+    {
+      sessionId: 'session-short-fork',
+      parentSessionId: 'session-root',
+      createdAt: 2,
+      forkTurn: 5,
+      turns: [1, 2, 3, 4, 5, 6, 7].map((turn) => ({ turn, text: 'fork ' + turn, time: turn })),
+    },
+  ];
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, longLine);
+  const cards = () => [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold]')];
+  const titles = () => cards().map((c) => c.querySelector('.mtx-card-title').textContent);
+
+  assert.equal(cards().length, 1, 'only the long run is folded: ' + titles().join(' / '));
+  assert.ok(titles().includes('24 turns in a row'), 'the run this branch continues on: ' + titles().join(' / '));
+
+  const ids = view.cardIds();
+  assert.ok(ids.includes('session-root#t30'), 'the turn you are at stays drawn');
+  assert.ok(!ids.includes('session-root#t20'), 'the middle of the long run is hidden');
+  assert.ok(ids.includes('session-root#t5'), 'while the turn the branches part at stays');
+  assert.ok(ids.includes('session-root#t1'), 'and a short run stays drawn — the threshold is per run');
+
+  const links = view.links();
+  const runFold = cards()[0].getAttribute('data-id');
+  assert.equal((links.find((l) => l.id === runFold) || {}).parent, 'session-root#t5',
+    'the run fold hangs off the turn before it');
+  assert.equal((links.find((l) => l.id === 'session-root#t30') || {}).head, true,
+    'the head of the line is never hidden inside a fold');
+
+  await view.clickTool(2);
+  assert.equal(cards().length, 0, 'the toolbar unfolds every stretch at once');
+  await view.clickTool(2);
+  assert.equal(cards().length, 2, 'and folds every run worth folding when asked by hand');
+  assert.ok(view.cardIds().includes('session-root#t1') === false, 'including the short shared run');
+});
+
 test('a family with nothing worth folding keeps the control out of the way', async (t) => {
   // Two turns and no branches: the only thing a fold could hide is one turn,
   // which trades a card for a card.

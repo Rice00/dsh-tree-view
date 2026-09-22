@@ -173,8 +173,10 @@ const PREFS_DEFAULTS = {
   // sidebar entry. Off by default: it archives a session, and archiving one
   // without being asked is not a favour.
   autoCollectPrevious: false,
-  // Shared history longer than this folds into a single node (0 = never fold).
-  // The fold node expands it again, and the toolbar can fold any trunk by hand.
+  // Straight stretches longer than this fold into a single node (0 = never
+  // fold). That covers the shared history above the first fork and the
+  // unbranched run any one branch continues on. A fold node unfolds again, and
+  // the toolbar can fold any stretch by hand.
   foldSharedAt: 8,
 };
 
@@ -232,11 +234,11 @@ const prefsStore = {
   },
 };
 
-// How the shared history is drawn, per family: 'auto' follows the threshold in
-// Settings, 'expanded' keeps the trunk open, 'folded' closes it by hand. Kept
-// for the page rather than for one mount, so switching tabs or views does not
-// undo a choice the reader just made.
-const trunkModes = new Map();
+// How long straight stretches are drawn, per family: 'auto' follows the
+// threshold in Settings, 'expanded' keeps them all open, 'folded' closes them by
+// hand. Kept for the page rather than for one mount, so switching tabs or views
+// does not undo a choice the reader just made.
+const foldModes = new Map();
 
 // What the fold threshold can be. 0 means "never fold on its own"; the toolbar
 // button folds by hand either way.
@@ -843,26 +845,29 @@ function buildTurnTree(versions, currentSessionId, options) {
 }
 
 /**
- * Fold the shared history of a family into a single node.
+ * Fold every long straight stretch of the tree into a single node.
  *
- * Walking down from the conversation's origin, every node with exactly one
- * child is a turn that every branch below it still contains: the shared
- * history. A deep family spends most of its canvas on that stretch and none of
- * it is a decision point, so it can be drawn as one node that says how many
- * turns it hides. The first node with two or more children is where the
- * branches actually part, and that one stays drawn — it is the thing you are
- * looking for.
+ * A turn with exactly one child says nothing about where you can go: the line
+ * simply continues. Such turns are pass-throughs, and a run of them can be
+ * hundreds of world units long while containing no decision at all — the shared
+ * history above the first fork is the biggest one, but the stretch a single
+ * branch runs on afterwards is just as long. Both fold.
  *
- * Returns `{ nodes, hiddenCount, id }`, or null when fewer than `minHidden`
- * turns would be hidden (a fold that hides one turn is just a wasted click).
+ * A run is bounded by the nodes that DO matter, and those stay drawn: the
+ * conversation's origin, where the branches part (two or more children), where
+ * the line ends, and the latest turn of the session you are reading (so the
+ * place you are adding to is never hidden inside a fold).
+ *
+ * Returns `{ nodes, folds }` where each fold is `{ id, hiddenCount, shared }`,
+ * or null when no run is long enough to be worth a node. `minHidden` is that
+ * floor: a fold that hides one turn just trades a card for a card.
  */
-function foldSharedHistory(nodes, minHidden) {
+function foldLongRuns(nodes, minHidden) {
   if (!(minHidden >= 1) || !Array.isArray(nodes) || nodes.length === 0) return null;
   let origin = null;
   for (let i = 0; i < nodes.length; i++) {
     if (nodes[i].isRoot) { origin = nodes[i]; break; }
   }
-  if (!origin) return null;
   const byId = new Map(nodes.map(function (n) { return [n.id, n]; }));
   const children = new Map();
   for (let i = 0; i < nodes.length; i++) {
@@ -872,49 +877,72 @@ function foldSharedHistory(nodes, minHidden) {
     if (list === undefined) children.set(n.parentId, [n]);
     else list.push(n);
   }
-  const chain = [];
-  const seen = new Set();
-  let cursor = origin;
-  while (cursor && !seen.has(cursor.id) && (children.get(cursor.id) || []).length === 1) {
-    seen.add(cursor.id);
-    chain.push(cursor);
-    cursor = children.get(cursor.id)[0];
+  function kidsOf(n) { return children.get(n.id) || []; }
+  // A pass-through is a turn that neither decides anything nor is a landmark.
+  function passThrough(n) {
+    return kidsOf(n).length === 1 && !n.isRoot && n.head !== true;
   }
-  if (!cursor || seen.has(cursor.id)) return null;
-  chain.push(cursor);
-  const hidden = chain.slice(1, chain.length - 1);
-  if (hidden.length < minHidden) return null;
 
-  const split = chain[chain.length - 1];
-  const hiddenIds = new Set(hidden.map(function (n) { return n.id; }));
-  const foldNode = {
-    id: origin.id + '#fold',
-    parentId: origin.id,
-    sessionId: hidden[0].sessionId,
-    turn: hidden[hidden.length - 1].turn,
-    fold: true,
-    foldCount: hidden.length,
-    foldFromTurn: hidden[0].turn,
-    foldToTurn: hidden[hidden.length - 1].turn,
-    time: hidden[0].time || 0,
-    // The fold stands in for those turns, so it is on the line exactly when
-    // they are: opening a branch keeps reading the shared history as the line
-    // you are on.
-    current: hidden.every(function (n) { return n.current === true; }),
-    onCurrentPath: hidden.every(function (n) { return n.onCurrentPath === true; }),
-    deleted: false,
-    archived: false,
-  };
+  const hiddenIds = new Set();
+  const folds = [];
+  const reparent = new Map();
+  for (let i = 0; i < nodes.length; i++) {
+    const start = nodes[i];
+    if (!passThrough(start)) continue;
+    const before = start.parentId ? byId.get(start.parentId) : null;
+    // Only the first turn of a run starts one; the rest are its interior.
+    if (before && passThrough(before)) continue;
+    const run = [];
+    let cursor = start;
+    while (cursor && passThrough(cursor)) {
+      run.push(cursor);
+      cursor = kidsOf(cursor)[0];
+    }
+    if (run.length < minHidden || !cursor) continue;
+    const exit = cursor;
+    const foldNode = {
+      id: run[0].id + '#fold',
+      parentId: before ? before.id : undefined,
+      sessionId: run[0].sessionId,
+      turn: run[run.length - 1].turn,
+      fold: true,
+      foldCount: run.length,
+      // The shared history is the run that starts at the conversation itself:
+      // every branch below it still contains those turns, which is what makes it
+      // different from a stretch only this line runs on.
+      foldShared: !before || before.isRoot === true,
+      foldFromTurn: run[0].turn,
+      foldToTurn: run[run.length - 1].turn,
+      time: run[0].time || 0,
+      // The fold stands in for those turns, so it is on the line exactly when
+      // they are: reading a branch keeps its history highlighted as one line.
+      current: run.every(function (n) { return n.current === true; }),
+      onCurrentPath: run.every(function (n) { return n.onCurrentPath === true; }),
+      deleted: false,
+      archived: false,
+    };
+    for (let k = 0; k < run.length; k++) hiddenIds.add(run[k].id);
+    reparent.set(exit.id, foldNode.id);
+    folds.push({ node: foldNode, id: foldNode.id, hiddenCount: run.length, shared: foldNode.foldShared });
+  }
+  if (folds.length === 0) return null;
+
   const out = [];
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (hiddenIds.has(n.id)) continue;
-    out.push(n === split ? Object.assign({}, n, { parentId: foldNode.id }) : n);
+    const parent = reparent.get(n.id);
+    out.push(parent === undefined ? n : Object.assign({}, n, { parentId: parent }));
   }
-  const at = out.findIndex(function (n) { return n.id === origin.id; });
-  if (at >= 0) out.splice(at + 1, 0, foldNode);
-  else out.push(foldNode);
-  return { nodes: out, hiddenCount: hidden.length, id: foldNode.id };
+  // Each fold hangs off the turn before its run, so it lands right where the
+  // turns it replaces used to be.
+  for (let i = 0; i < folds.length; i++) {
+    const anchor = folds[i].node.parentId;
+    const at = out.findIndex(function (n) { return n.id === anchor; });
+    if (at >= 0) out.splice(at + 1, 0, folds[i].node);
+    else out.push(folds[i].node);
+  }
+  return { nodes: out, folds: folds };
 }
 
 /**
@@ -1215,12 +1243,13 @@ return {
         dropForksLabel: 'Hide content-less forks',
         dropForksHint: 'A fork that only copied this conversation is not drawn.',
         foldTurns: '{count} shared turns',
+        foldRun: '{count} turns in a row',
         foldExpandHint: 'Click to unfold these turns',
-        foldCollapse: 'Fold the shared history',
-        foldExpand: 'Unfold the shared history',
-        foldNothing: 'Nothing to fold yet',
-        foldSharedLabel: 'Fold the shared history',
-        foldSharedHint: 'The turns every branch has in common — the stretch above the first fork — are drawn as one node once that many are hidden. Click that node (or the toolbar button) to unfold them again. "Never" leaves them drawn; the toolbar can still fold them by hand.',
+        foldCollapse: 'Fold long stretches',
+        foldExpand: 'Unfold long stretches',
+        foldNothing: 'Nothing long enough to fold',
+        foldSharedLabel: 'Fold long stretches',
+        foldSharedHint: 'The turns every branch has in common, and any unbranched run a single branch continues on, are drawn as one node once that many of them are hidden. Click that node (or the toolbar button) to unfold them again. "Never" leaves them drawn; the toolbar can still fold them by hand.',
         foldSharedOff: 'Never',
         foldSharedAt: '{count} or more turns',
         autoCollectLabel: 'Put the branch I leave back into the tree',
@@ -1283,12 +1312,13 @@ return {
         dropForksLabel: '剔除空 Fork',
         dropForksHint: '只复制了本对话、自己没聊出新内容的 Fork 不画出来。',
         foldTurns: '共用历史 · {count} 轮',
+        foldRun: '连续 {count} 轮',
         foldExpandHint: '点击展开这几轮',
-        foldCollapse: '折叠共用历史',
-        foldExpand: '展开共用历史',
-        foldNothing: '目前没有可折叠的共用历史',
-        foldSharedLabel: '折叠共用历史',
-        foldSharedHint: '每个分支都一样的开头（第一次分叉之前的那一段）隐藏轮数达到这个值时，折成一个节点画出来。点那个节点（或工具栏的折叠按钮）即可展开。选「永不」则一直画全；工具栏仍可手动折叠。',
+        foldCollapse: '折叠长段',
+        foldExpand: '展开长段',
+        foldNothing: '没有长到需要折叠的连续轮次',
+        foldSharedLabel: '折叠长段',
+        foldSharedHint: '「每个分支都一样的开头」以及「一条分支一路直下、中途没有分叉的连续轮次」，隐藏轮数达到这个值时折成一个节点。点那个节点（或工具栏的折叠按钮）即可展开。选「永不」则一直画全；工具栏仍可手动折叠。',
         foldSharedOff: '永不',
         foldSharedAt: '{count} 轮及以上',
         autoCollectLabel: '切换分支时自动收起上一个',
@@ -1764,27 +1794,34 @@ return {
         return buildTurnTree(versions, sessionId, { dropEmptyForks: prefs.dropEmptyForks });
       }, [versions, sessionId, prefs.dropEmptyForks]);
 
-      // The shared history above the first branch point. Requiring two hidden
-      // turns means a fold always saves a row rather than trading one card for
-      // another; whether it is worth drawing is decided here, from the threshold
-      // in Settings or the reader's own toggle in the toolbar.
-      const [, bumpTrunk] = React.useReducer(function (x) { return x + 1; }, 0);
-      const trunk = React.useMemo(function () { return foldSharedHistory(fullNodes, 2); }, [fullNodes]);
-      const trunkRootId = (function () {
+      // Every long straight stretch of the tree — the shared history above the
+      // first fork, and the unbranched run any single branch continues on.
+      // `AUTO` folds the runs that reach the threshold from Settings; pressing
+      // the toolbar control folds every run worth folding (two turns or more),
+      // which is also how an automatic fold is undone.
+      const [, bumpFold] = React.useReducer(function (x) { return x + 1; }, 0);
+      const FOLD_FLOOR = 2;
+      const familyRootId = (function () {
         for (let i = 0; i < fullNodes.length; i++) {
           if (fullNodes[i].isRoot) return fullNodes[i].id;
         }
         return null;
       })();
-      const trunkMode = trunkRootId ? (trunkModes.get(trunkRootId) || 'auto') : 'auto';
-      const trunkFolded = !!trunk && trunkMode !== 'expanded'
-        && (trunkMode === 'folded' || (prefs.foldSharedAt > 0 && trunk.hiddenCount >= prefs.foldSharedAt));
-      const turnNodes = trunkFolded ? trunk.nodes : fullNodes;
+      const foldMode = familyRootId ? (foldModes.get(familyRootId) || 'auto') : 'auto';
+      const autoFoldAt = prefs.foldSharedAt > 0 ? Math.max(prefs.foldSharedAt, FOLD_FLOOR) : 0;
+      const foldAt = foldMode === 'folded' ? FOLD_FLOOR : (foldMode === 'expanded' ? 0 : autoFoldAt);
+      const foldable = React.useMemo(function () { return foldLongRuns(fullNodes, FOLD_FLOOR); }, [fullNodes]);
+      const folds = React.useMemo(function () {
+        if (foldAt <= 0) return null;
+        return foldAt === FOLD_FLOOR ? foldable : foldLongRuns(fullNodes, foldAt);
+      }, [fullNodes, foldAt, foldable]);
+      const folded = !!folds;
+      const turnNodes = folded ? folds.nodes : fullNodes;
 
-      function setTrunkMode(mode) {
-        if (!trunkRootId) return;
-        trunkModes.set(trunkRootId, mode);
-        bumpTrunk();
+      function setFoldMode(mode) {
+        if (!familyRootId) return;
+        foldModes.set(familyRootId, mode);
+        bumpFold();
       }
 
       const layoutKey = turnNodes.map(function (n) {
@@ -1989,7 +2026,7 @@ return {
         if (!node || node.deleted) return;
         // The fold node is not a session; it is the shared history in one card,
         // and clicking it is how you read that history again.
-        if (node.fold) { setTrunkMode('expanded'); return; }
+        if (node.fold) { setFoldMode('expanded'); return; }
         if (!sessions) return;
         const v = versions.find(function (item) { return item.sessionId === node.sessionId; });
         if (!v) return;
@@ -2195,7 +2232,9 @@ return {
       }
 
       function cardTitle(n) {
-        if (n.fold) return t('foldTurns', { count: n.foldCount });
+        if (n.fold) return n.foldShared
+          ? t('foldTurns', { count: n.foldCount })
+          : t('foldRun', { count: n.foldCount });
         if (n.deleted) return t('deletedVersion');
         if (n.copy) return t('copyBranch');
         if (n.isRoot) return t('original');
@@ -2396,11 +2435,11 @@ return {
           React.createElement('button', {
             type: 'button',
             className: 'mtx-tool',
-            'data-on': trunkFolded ? '' : undefined,
-            'aria-pressed': trunkFolded ? 'true' : 'false',
-            title: !trunk ? t('foldNothing') : (trunkFolded ? t('foldExpand') : t('foldCollapse')),
-            disabled: !trunk || undefined,
-            onClick: function () { setTrunkMode(trunkFolded ? 'expanded' : 'folded'); },
+            'data-on': folded ? '' : undefined,
+            'aria-pressed': folded ? 'true' : 'false',
+            title: !foldable ? t('foldNothing') : (folded ? t('foldExpand') : t('foldCollapse')),
+            disabled: !foldable || undefined,
+            onClick: function () { setFoldMode(folded ? 'expanded' : 'folded'); },
           }, FoldIcon()),
           React.createElement('button', {
             type: 'button', className: 'mtx-tool', title: t('fit'),
