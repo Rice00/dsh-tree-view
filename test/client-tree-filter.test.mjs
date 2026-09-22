@@ -125,6 +125,9 @@ test('the switch decides whether a photocopy is drawn, and the layout stays sane
 });
 
 test('with the switch off, a photocopy is drawn as one copy node', async (t) => {
+  // The stored preference object this harness writes has no schema version,
+  // which is also how a pre-migration object looked: only the one key whose
+  // meaning changed may be dropped, so this toggle has to arrive intact.
   const shown = await mountView(t, { dropEmptyForks: false });
   const ids = shown.cardIds();
   assert.ok(ids.includes('session-copy#fork'), 'the copy gets exactly one node');
@@ -250,4 +253,17 @@ test('a gap in the turn numbering does not orphan the chain', async (t) => {
   assert.deepEqual(links.filter((link) => link.parent === 'session-root#root').map((link) => link.id),
     ['session-root#t1'],
     'only the conversation\'s own first turn hangs off the root — the fork hangs off turn 15');
+});
+
+test('a toggle is written with the current preference schema', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true });
+  assert.ok(!view.cardIds().includes('session-copy#fork'), 'the copy is hidden while the filter is on');
+
+  await view.clickTool(0);
+  assert.ok(view.cardIds().includes('session-copy#fork'), 'the switch draws it again');
+
+  const stored = JSON.parse(view.dom.window.localStorage.getItem('dsh-tree-view:prefs'));
+  assert.equal(stored.v, 2, 'the write carries the schema version, so a later read honours the choice');
+  assert.equal(stored.dropEmptyForks, false, 'and the toggle that was flipped');
+  assert.equal(stored.stopOnEdit, true, 'while the other toggles ride along in the same object');
 });

@@ -151,12 +151,18 @@ let lastViewedSessionId;
 
 /* --------------------------------------------------------------- prefs -- */
 
-// Behaviour toggles, persisted next to the style choice. Both default to the
-// behaviour the user asked for rather than the old one.
+// Behaviour toggles, persisted next to the style choice. `v` is the schema
+// version, and it exists for one migration: `rememberPath` shipped on, and it
+// navigated the app away from the conversation you had just clicked. Reading a
+// conversation must not move you somewhere else, so it now defaults to off.
+const PREFS_VERSION = 2;
 const PREFS_KEY = 'dsh-tree-view:prefs';
 const PREFS_DEFAULTS = {
-  // Restore the last-viewed branch when reopening a conversation.
-  rememberPath: true,
+  // Jump back to the branch you last had open when you come back to its family.
+  // Off by default: a click on a conversation opens that conversation. On, it
+  // still refuses to fire on a page load, on a move inside the same family, or
+  // for a branch the sidebar is not listing — see the restore in UserMessageView.
+  rememberPath: false,
   // Cancel a still-running turn before an edit forks the conversation.
   stopOnEdit: true,
   // Hide forks that copied the conversation and never added a turn of their own.
@@ -176,16 +182,25 @@ const prefsStore = {
         const raw = g && g.localStorage && g.localStorage.getItem(PREFS_KEY);
         parsed = raw ? JSON.parse(raw) : null;
       } catch (e) {}
+      // A preference object written before this schema carries `rememberPath:
+      // true` — either because that was the default or because it was turned on
+      // — and the two cannot be told apart. That one stored value is dropped so
+      // the new default takes effect; every other toggle survives, and turning
+      // this one on again writes the current version and is honoured from then
+      // on. (Only `rememberPath` changed meaning: a stored preference is
+      // otherwise never taken away from the user.)
+      const current = !!parsed && parsed.v === PREFS_VERSION;
       const out = {};
       for (const k in PREFS_DEFAULTS) {
-        out[k] = parsed && typeof parsed[k] === 'boolean' ? parsed[k] : PREFS_DEFAULTS[k];
+        const usable = parsed && typeof parsed[k] === 'boolean' && (current || k !== 'rememberPath');
+        out[k] = usable ? parsed[k] : PREFS_DEFAULTS[k];
       }
       this.value = out;
     }
     return this.value;
   },
   set(patch) {
-    const next = Object.assign({}, this.get(), patch);
+    const next = Object.assign({}, this.get(), patch, { v: PREFS_VERSION });
     this.value = next;
     try {
       const g = realGlobal();
@@ -1082,8 +1097,8 @@ return {
         styleDesc_claude: 'Retry, edit and copy under the bubble, revealed on hover. Cancel and Save sit below the editor.',
         deletedVersion: 'Deleted version',
         archivedTag: 'Archived',
-        rememberPathLabel: 'Remember the version I was viewing',
-        rememberPathHint: 'Reopening a conversation returns to the branch you last had open instead of the original. Off means it always opens the first version.',
+        rememberPathLabel: 'Jump back to the branch I last had open',
+        rememberPathHint: 'Off by default: the conversation you click is the conversation you get, and this plugin never switches sessions on its own. On, coming back to a family from another conversation opens the branch you last had open in it — but only a branch the sidebar is listing, and never on a page load or when you moved inside the family yourself.',
         stopOnEditLabel: 'Stop the running reply when I edit',
         stopOnEditHint: 'Editing or retrying cancels every reply still being generated in this conversation before branching, including other versions, so no superseded answer keeps spending tokens. This also lets you edit mid-reply. Off leaves them running.',
         renamePrompt: 'Rename this branch',
@@ -1139,8 +1154,8 @@ return {
         styleDesc_claude: '气泡下方为重试、编辑与复制，悬停时显示；「取消 / 保存」位于编辑框下方。',
         deletedVersion: '已删除的版本',
         archivedTag: '已归档',
-        rememberPathLabel: '记住我正在查看的版本',
-        rememberPathHint: '重新打开会话时回到上次查看的分支，而不是最初那条。关闭后始终打开第一个版本。',
+        rememberPathLabel: '自动跳回上次那条分支',
+        rememberPathHint: '默认关闭：你点哪个会话就打开哪个会话，插件从不自己切换会话。开启后，只有「你从别的会话点进这个家族」并且「那条分支仍在侧栏里」时才会跳过去 —— 页面刚加载、或你在家族内部自己走动时，都不会跳。',
         stopOnEditLabel: '编辑时中止正在生成的回复',
         stopOnEditHint: '编辑或重试时，先取消该会话中所有仍在生成的回复（包括其它版本）再分支，避免被取代的回答继续消耗额度；同时允许在回复过程中直接编辑。关闭后它们会继续跑完。',
         renamePrompt: '重命名这个分支',
@@ -1296,13 +1311,13 @@ return {
       const tree = useTree(sessionId);
       const ring = typeof turn === 'number' ? ringFor(tree && tree.versions, sessionId, turn) : null;
 
-      // Remember which branch of this family is open, and restore it when we
-      // land back on the family root. Runs per bubble, so every step is either
-      // idempotent or guarded — see activePathStore.
+      // Remember which branch of this family is open, and — only when the
+      // setting asks for it — restore it when we land back on the family root.
+      // Runs per bubble, so every step is either idempotent or guarded — see
+      // activePathStore.
       const versions = tree && tree.versions;
       const prefs = usePrefs();
       React.useEffect(function () {
-        if (!prefs.rememberPath) return;
         if (!versions || sessionId === undefined) return;
         const root = rootOf(versions, sessionId);
         if (!root) return;
@@ -1315,6 +1330,10 @@ return {
           activePathStore.set(root, sessionId);
           return;
         }
+        // The memory is kept even while the setting is off, so turning it on
+        // knows which branch you were reading instead of starting from nothing.
+        // What the setting gates is navigation, and nothing else.
+        if (!prefs.rememberPath) return;
         // On the root. Don't record while a restore we triggered is still in
         // flight, or we would overwrite the target with the root we are leaving.
         if (pendingRestore.has(root)) return;

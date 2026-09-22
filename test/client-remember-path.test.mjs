@@ -54,7 +54,10 @@ async function mountChat(t, options = {}) {
     url: 'https://tree-view.test/',
     pretendToBeVisual: true,
   });
-  dom.window.localStorage.setItem('dsh-tree-view:prefs', JSON.stringify({ rememberPath: true }));
+  // The switch is off by default now, so a test that wants the restore writes
+  // the current schema out — which is exactly what a real toggle writes.
+  const prefs = options.prefs === undefined ? { v: 2, rememberPath: true } : options.prefs;
+  dom.window.localStorage.setItem('dsh-tree-view:prefs', JSON.stringify(prefs));
   if (options.remembered) {
     dom.window.localStorage.setItem(PATH_KEY, JSON.stringify({ 'session-root': options.remembered }));
   }
@@ -189,6 +192,7 @@ test('an archived branch is not unarchived behind your back', async (t) => {
 });
 
 test('reopening the family from elsewhere still returns to the branch', async (t) => {
+  // Also the "turned on in this schema" case: the harness writes v2 above.
   const chat = await mountChat(t, { remembered: 'session-branch' });
 
   await chat.render('session-other');
@@ -197,6 +201,34 @@ test('reopening the family from elsewhere still returns to the branch', async (t
   await chat.render('session-root');
   assert.deepEqual(chat.opened, ['session-branch'],
     'the branch you last had open is what a fresh landing on the family restores');
+});
+
+test('the switch is off by default: nothing navigates, but the memory is kept', async (t) => {
+  const chat = await mountChat(t, { prefs: {} });
+
+  await chat.render('session-branch');
+  const kept = JSON.parse(chat.dom.window.localStorage.getItem('dsh-tree-view:active-path') || '{}');
+  assert.equal(kept['session-root'], 'session-branch',
+    'the branch you read is still recorded, so turning the switch on knows where you were');
+
+  await chat.render('session-other');
+  await chat.render('session-root');
+  assert.deepEqual(chat.opened, [], 'with the switch off the plugin never switches sessions');
+});
+
+test('a preference stored before this schema does not carry the old jump forward', async (t) => {
+  // The stored object says `rememberPath: true`, but it was written when that
+  // was the default — a stored preference cannot be told from an inherited one,
+  // which is why the schema version exists. Other toggles in the same object
+  // keep their values (client-tree-filter covers that side).
+  const chat = await mountChat(t, {
+    remembered: 'session-branch',
+    prefs: { rememberPath: true, stopOnEdit: false, dropEmptyForks: false },
+  });
+
+  await chat.render('session-other');
+  await chat.render('session-root');
+  assert.deepEqual(chat.opened, [], 'an inherited value is dropped rather than honoured');
 });
 
 test('the restore does not fire twice in one page load', async (t) => {
