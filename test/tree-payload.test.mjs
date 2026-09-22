@@ -56,6 +56,9 @@ function harness(options) {
   }
 
   let route;
+  const archivedIds = [...archived];
+  const running = new Set(options.running ?? []);
+  const stopped = [];
   const ctx = {
     get(name) { return this[name]; },
     effect(fn) { fn(); },
@@ -63,7 +66,8 @@ function harness(options) {
     sessions: { get: (id) => records.get(id)?.session, flush: async () => {} },
     sessionPersistence: {},
     workspaceRegistry: {
-      archivedSessionIds: archived,
+      archivedSessionIds: archivedIds,
+      async archiveSession(id) { if (!archivedIds.includes(id)) archivedIds.push(id); },
       list: () => [{ sessionIds: [...records.keys()], attachSession: async () => {} }],
     },
     sessionQuery: {
@@ -78,22 +82,37 @@ function harness(options) {
         };
       },
     },
-    agents: { get: () => undefined },
+    // The agent loop is what says whether a session is mid-turn; the double
+    // reports the same shape the panel reads.
+    agents: {
+      get: (id) => (running.has(id)
+        ? { phase: { kind: 'running' }, cancel() { stopped.push(id); }, async whenIdle() {} }
+        : { phase: { kind: 'idle' } }),
+    },
   };
   apply(ctx);
 
-  return async function get(sessionId) {
-    const request = Readable.from([]);
-    request.method = 'GET';
-    request.url = '/tree-view?sessionId=' + encodeURIComponent(sessionId);
+  async function request(method, payload) {
+    const stream = Readable.from(payload === undefined ? [] : [JSON.stringify(payload)]);
+    stream.method = method;
+    stream.url = '/tree-view?sessionId=' + encodeURIComponent(payload?.sessionId ?? '');
     let status;
-    let payload;
-    await route(request, {
+    let body;
+    await route(stream, {
       writeHead(code) { status = code; },
-      end(json) { payload = json === undefined ? undefined : JSON.parse(json); },
+      end(json) { body = json === undefined ? undefined : JSON.parse(json); },
     });
-    return { status, body: payload };
-  };
+    return { status, body };
+  }
+
+  const get = (sessionId) => request('GET', { sessionId });
+  // The returned function is the GET helper; the extras ride along so existing
+  // call sites keep working.
+  get.post = (payload) => request('POST', payload);
+  get.archivedIds = archivedIds;
+  get.stopped = stopped;
+  get.running = running;
+  return get;
 }
 
 test('a side-chat fork archived away from the sidebar is not drawn as a branch', async () => {
@@ -153,6 +172,48 @@ test('a version the tree put away stays on the tree, name and all', async () => 
   const after = await get('session-root');
   assert.deepEqual(after.body.versions.map((v) => v.sessionId), ['session-root'],
     'once promoted it is an ordinary session again, and a branch only if it has descendants');
+});
+
+test('collecting the others refuses while something runs, then stops and collects', async () => {
+  const get = harness({
+    archived: [],
+    running: ['session-branch'],
+    sessions: [
+      { id: 'session-root', forkTurns: 0, ownTurns: 14 },
+      { id: 'session-branch', parent: 'session-root', createdAt: 10, marker: true },
+    ],
+  });
+
+  const refused = await get.post({ action: 'demoteOthers', sessionId: 'session-root' });
+  assert.equal(refused.status, 409, 'a running branch is not collected silently');
+  assert.deepEqual(refused.body.busy, ['session-branch'], 'and the panel is told which one');
+  assert.deepEqual(get.archivedIds, [], 'nothing was archived by the refusal');
+
+  const confirmed = await get.post({ action: 'demoteOthers', sessionId: 'session-root', stopRunning: true });
+  assert.equal(confirmed.status, 200);
+  assert.deepEqual(confirmed.body.collected, ['session-branch'], 'the other version is collected');
+  assert.deepEqual(confirmed.body.stopped, ['session-branch'], 'and its turn was stopped');
+  assert.deepEqual(get.stopped, ['session-branch']);
+  assert.deepEqual(get.archivedIds, ['session-branch'], 'it left the sidebar');
+
+  const after = await get('session-root');
+  assert.deepEqual(after.body.versions.map((v) => v.sessionId), ['session-root', 'session-branch'],
+    'a collected branch stays on the tree — that is the whole point of collecting it');
+});
+
+test('collecting the others never touches the conversation being viewed', async () => {
+  const get = harness({
+    archived: [],
+    sessions: [
+      { id: 'session-root', forkTurns: 0, ownTurns: 14 },
+      { id: 'session-branch', parent: 'session-root', createdAt: 10, marker: true },
+    ],
+  });
+  const response = await get.post({ action: 'demoteOthers', sessionId: 'session-root' });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.collected, ['session-branch']);
+  assert.ok(!get.archivedIds.includes('session-root'), 'the open conversation is never archived');
+  assert.deepEqual(response.body.stopped, [], 'and nothing needed stopping');
 });
 
 test('a live branch is untouched by the archived filter', async () => {

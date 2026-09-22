@@ -461,7 +461,13 @@ async function mutate(operation) {
     body: JSON.stringify(operation),
   });
   const body = await res.json().catch(function () { return {}; });
-  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+  if (!res.ok) {
+    // The body rides on the error: a refusal carries the list of busy sessions,
+    // which is exactly what the panel has to ask about.
+    const failure = new Error(body.error || ('HTTP ' + res.status));
+    failure.body = body;
+    throw failure;
+  }
   return body;
 }
 
@@ -592,6 +598,7 @@ function buildTurnTree(versions, currentSessionId, options) {
   //
   // So: build every node first, then link them by what actually exists.
   const byVersion = new Map();
+  const plans = new Map();
   for (let i = 0; i < kept.length; i++) {
     const v = kept[i];
     const isCurrentSession = v.sessionId === currentSessionId;
@@ -603,9 +610,33 @@ function buildTurnTree(versions, currentSessionId, options) {
       nodeMap.set(node.id, node);
       list.push(node);
     };
-    const ownTurns = v.parentSessionId === undefined
-      ? turns
-      : turns.filter(function (t) { return t.turn >= (isFork ? v.forkTurn + 1 : (typeof v.targetTurn === 'number' ? v.targetTurn : 1)); });
+    // A fork replays the turn it forked in, and copies every prompt before it.
+    // Those are the SAME turns the parent already has — identity here is the
+    // prompt text — so drawing them again would put a second "turn 16" on the
+    // canvas while the two are one node in the conversation's history. Skip
+    // them, and hang the fork's first genuinely new turn off the parent's copy
+    // of the last shared turn.
+    let sharedThrough = null;
+    let ownTurns;
+    if (v.parentSessionId === undefined) {
+      ownTurns = turns;
+    } else {
+      const from = isFork ? v.forkTurn + 1 : (typeof v.targetTurn === 'number' ? v.targetTurn : 1);
+      const parentVersion = byId.get(v.parentSessionId);
+      const parentText = new Map();
+      for (const turn of (parentVersion && parentVersion.turns) || []) parentText.set(turn.turn, turn.text || '');
+      ownTurns = turns.filter(function (t) { return t.turn >= from; }).filter(function (t) {
+        if (!isFork) return true;
+        const parent = parentText.get(t.turn);
+        if (parent === undefined || parent !== (t.text || '')) return true;
+        sharedThrough = t.turn;
+        return false;
+      });
+    }
+    const attachTurn = sharedThrough !== null
+      ? sharedThrough
+      : (isFork ? v.forkTurn : (typeof v.targetTurn === 'number' ? v.targetTurn - 1 : 0));
+    plans.set(v.sessionId, { attachTurn: attachTurn, isFork: isFork });
 
     if (!v.parentSessionId) {
       for (let j = 0; j < turns.length; j++) {
@@ -697,6 +728,7 @@ function buildTurnTree(versions, currentSessionId, options) {
     const list = byVersion.get(v.sessionId);
     if (!list) continue;
     const isFork = typeof v.targetTurn !== 'number' && typeof v.forkTurn === 'number';
+    for (let k = 0; k < list.length; k++) list[k].running = v.running === true;
     for (let j = 0; j < list.length; j++) {
       if (j > 0) {
         list[j].parentId = list[j - 1].id;
@@ -707,9 +739,10 @@ function buildTurnTree(versions, currentSessionId, options) {
         continue;
       }
       // A version's first node hangs off the nearest node its parent actually
-      // has at or before the turn it forked from; the root is the last resort.
-      const attachTurn = isFork ? v.forkTurn : (typeof v.targetTurn === 'number' ? v.targetTurn - 1 : 0);
-      const parent = nearestNodeAt(v.parentSessionId, attachTurn);
+      // has at or before the turn it forked from (or the last turn it shares
+      // with that parent); the root is the last resort.
+      const plan = plans.get(v.sessionId) || {};
+      const parent = nearestNodeAt(v.parentSessionId, plan.attachTurn ?? 0);
       list[j].parentId = parent === null ? rootNodeId : parent.id;
     }
   }
@@ -893,6 +926,12 @@ const CSS = [
   '.mtx-tool{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:var(--dsw-alias-bg-primary,rgba(30,30,34,.85));color:var(--dsw-alias-label-secondary,#bbb);cursor:pointer;font-size:14px}',
   '.mtx-tool:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
   '.mtx-tool[data-on]{color:var(--dsw-alias-accent-primary,#4b8dff);border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 55%,transparent);background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 14%,transparent)}',
+  '.mtx-confirm{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);z-index:10;max-width:330px;padding:14px 16px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--dsw-alias-bg-primary,#1e1e22);box-shadow:0 14px 40px rgba(0,0,0,.4)}',
+  '.mtx-confirm-title{font-size:12.5px;line-height:19px;color:var(--dsw-alias-label-primary,#eee)}',
+  '.mtx-confirm-actions{display:flex;gap:8px;margin-top:12px}',
+  '.mtx-btn{appearance:none;font-family:inherit;font-size:12px;padding:6px 12px;border-radius:9px;cursor:pointer;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:transparent;color:var(--dsw-alias-label-primary,#eee)}',
+  '.mtx-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08))}',
+  '.mtx-btn-primary{border-color:var(--dsw-alias-accent-primary,#4b8dff);color:var(--dsw-alias-accent-primary,#4b8dff)}',
   '.mtx-empty{position:absolute;left:0;right:0;bottom:26px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;pointer-events:none}',
   '.mtx-graph .mtx-link{position:absolute;right:14px;bottom:10px;font-size:12px;color:var(--dsw-alias-label-tertiary);text-decoration:none;z-index:4}',
   '.mtx-link:hover{color:var(--dsw-alias-label-primary)}',
@@ -1022,8 +1061,13 @@ return {
         menuHint: 'Right-click for branch actions',
         copyBranch: 'Forked copy',
         forkedAt: 'forked at turn {turn}',
-        dropForksLabel: 'Hide forks with no new content',
-        dropForksHint: 'On: a fork that only copied this conversation is kept out of the tree. Off: every fork is drawn, each one hanging off the turn it forked from.',
+        dropForksLabel: 'Hide content-less forks',
+        dropForksHint: 'A fork that only copied this conversation is not drawn.',
+        collectOthers: 'Collect every other branch',
+        collectRunning: '{count} branch(es) are still running a task.',
+        collectStop: 'Stop and collect',
+        collectFailed: 'Collect failed: {message}',
+        runningTag: 'running',
         menuRename: 'Rename branch',
         menuPromote: 'Move to main chat',
         menuDemote: 'Collect into the tree',
@@ -1072,8 +1116,13 @@ return {
         menuHint: '右键打开分支操作',
         copyBranch: '分叉副本',
         forkedAt: '分叉于第 {turn} 轮',
-        dropForksLabel: '剔除无新内容的 Fork',
-        dropForksHint: '开：只整份复制了本对话、自己没聊出任何一轮的 Fork 不进树。关：所有 Fork 都画出来，各自挂在自己分叉的那一轮上。',
+        dropForksLabel: '剔除空 Fork',
+        dropForksHint: '只复制了本对话、自己没聊出新内容的 Fork 不画出来。',
+        collectOthers: '收起其它分支',
+        collectRunning: '有 {count} 个分支正在跑任务。',
+        collectStop: '中止任务并收起',
+        collectFailed: '收起失败：{message}',
+        runningTag: '运行中',
         menuRename: '重命名分支',
         menuPromote: '放到主对话',
         menuDemote: '收到 Tree 里',
@@ -1095,6 +1144,49 @@ return {
       }
     } catch (e) {
       console.warn('[dsh-tree-view] Failed to register translations; using English.', e);
+    }
+
+    /**
+     * Two branches off one stem — the second one dashed while empty forks are
+     * filtered out, solid while they are shown. The icon states what the button
+     * does instead of needing a sentence.
+     */
+    function ForkIcon(props) {
+      const filtered = props && props.filtered;
+      return React.createElement('svg', {
+        width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
+      },
+        React.createElement('path', {
+          d: 'M4.2 13.4V3.2M4.2 5.6h7.2', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
+        }),
+        React.createElement('circle', { cx: 11.8, cy: 5.6, r: 1.7, fill: 'currentColor' }),
+        React.createElement('path', {
+          d: 'M4.2 9.4h4.6', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
+          strokeDasharray: filtered ? '2 2.2' : undefined,
+        }),
+        React.createElement('circle', {
+          cx: 11.8, cy: 9.4, r: 1.7, fill: 'currentColor', opacity: filtered ? 0.35 : 1,
+        }));
+    }
+
+    /** Everything funnelled back into one place: collect the other branches. */
+    function CollectIcon() {
+      return React.createElement('svg', {
+        width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
+      },
+        React.createElement('path', {
+          d: 'M2.4 12.6h11.2', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
+        }),
+        React.createElement('path', {
+          d: 'M3.6 3.2v3.4a2 2 0 0 0 2 2h4.8', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
+        }),
+        React.createElement('path', {
+          d: 'M12.4 3.2v3.4a2 2 0 0 1-2 2H8.6', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
+        }),
+        React.createElement('path', {
+          d: 'M8 6.4v5.6m0 0-1.8-1.8M8 12l1.8-1.8', stroke: 'currentColor', strokeWidth: 1.3,
+          strokeLinecap: 'round', strokeLinejoin: 'round',
+        }));
     }
 
     function PencilIcon() {
@@ -1409,6 +1501,11 @@ return {
       const menuState = React.useState(null);
       const menu = menuState[0];
       const setMenu = menuState[1];
+      // Versions the host refused to collect because they are mid-turn; the
+      // panel asks about stopping them instead of killing work silently.
+      const confirmState = React.useState(null);
+      const confirmBusy = confirmState[0];
+      const setConfirmBusy = confirmState[1];
       const springs = React.useRef(new Map());
       const layoutRef = React.useRef(null);
       const viewRef = React.useRef({ x: 60, y: 42, scale: 1 });
@@ -1625,6 +1722,30 @@ return {
         openVersionTarget(sessions, v);
         showChat();
         if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
+      }
+
+      /**
+       * Collect every other version of this conversation into the tree, so the
+       * sidebar keeps one entry. The host refuses while a version is mid-turn;
+       * only the confirmed second call (`stopRunning`) has those turns stopped.
+       */
+      function collectOthers(stopRunning) {
+        setMenu(null);
+        setRenameError(null);
+        mutate({ action: 'demoteOthers', sessionId: sessionId, stopRunning: stopRunning === true })
+          .then(function () {
+            setConfirmBusy(null);
+            treeStore.load(sessionId);
+          })
+          .catch(function (error) {
+            const busy = error && error.body && Array.isArray(error.body.busy) ? error.body.busy : null;
+            if (busy !== null && busy.length > 0 && stopRunning !== true) {
+              setConfirmBusy(busy);
+              return;
+            }
+            const message = error && error.message ? error.message : String(error);
+            setRenameError(t('collectFailed', { message: message }));
+          });
       }
 
       /**
@@ -1849,7 +1970,8 @@ return {
             // A named branch reads as a group: the name belongs to the box drawn
             // around the branch, and the node keeps saying what it is ("edited
             // turn 3"), so neither piece of information displaces the other.
-            const sub = (n.copy ? t('forkedAt', { turn: n.turn }) + ' · ' : '')
+            const sub = (n.running ? t('runningTag') + ' · ' : '')
+              + (n.copy ? t('forkedAt', { turn: n.turn }) + ' · ' : '')
               + (n.archived ? t('archivedTag') + ' · ' : '')
               + (n.text ? '“' + clip(n.text, 44) + '” · ' : '')
               + (n.isRoot && !n.text && summary && summary.displayTitle ? clip(summary.displayTitle, 24) + ' · ' : '')
@@ -1866,6 +1988,7 @@ return {
               'data-path': n.onCurrentPath || undefined,
               'data-deleted': n.deleted || undefined,
               'data-archived': n.archived || undefined,
+              'data-running': n.running || undefined,
               title: n.deleted ? undefined : t('menuHint'),
               onContextMenu: function (ev) {
                 ev.preventDefault();
@@ -1965,17 +2088,23 @@ return {
           })()
         ),
         React.createElement('div', { className: 'mtx-graph-tools' },
-          // The filter is a switch and not a hidden default: whether a fork that
-          // copied the conversation and added nothing belongs on the canvas is
-          // the reader's call, not ours.
+          // Two controls over what the canvas shows, drawn as what they do: the
+          // fork icon loses its second branch while empty forks are filtered
+          // out, so the button does not need a sentence to explain itself.
           React.createElement('button', {
             type: 'button',
             className: 'mtx-tool',
             'data-on': prefs.dropEmptyForks ? '' : undefined,
             'aria-pressed': prefs.dropEmptyForks ? 'true' : 'false',
-            title: t('dropForksLabel') + ' — ' + t('dropForksHint'),
+            title: t('dropForksLabel'),
             onClick: function () { prefsStore.set({ dropEmptyForks: !prefs.dropEmptyForks }); },
-          }, '⧉'),
+          }, ForkIcon({ filtered: prefs.dropEmptyForks })),
+          React.createElement('button', {
+            type: 'button',
+            className: 'mtx-tool',
+            title: t('collectOthers'),
+            onClick: function () { collectOthers(false); },
+          }, CollectIcon()),
           React.createElement('button', {
             type: 'button', className: 'mtx-tool', title: t('fit'),
             onClick: function () { fitView(); },
@@ -1987,6 +2116,22 @@ return {
         ),
         tree && tree.error ? React.createElement('div', { className: 'mtx-error' }, tree.error) : null,
         renameError ? React.createElement('div', { className: 'mtx-error' }, renameError) : null,
+        // Tidying up never kills work quietly: a version that is mid-turn gets
+        // this question first. Drawn in the panel because the desktop shell
+        // implements neither prompt() nor confirm().
+        confirmBusy === null ? null : React.createElement('div', { className: 'mtx-confirm' },
+          React.createElement('div', { className: 'mtx-confirm-title' }, t('collectRunning', { count: confirmBusy.length })),
+          React.createElement('div', { className: 'mtx-confirm-actions' },
+            React.createElement('button', {
+              type: 'button', className: 'mtx-btn mtx-btn-primary',
+              onClick: function () { collectOthers(true); },
+            }, t('collectStop')),
+            React.createElement('button', {
+              type: 'button', className: 'mtx-btn',
+              onClick: function () { setConfirmBusy(null); },
+            }, t('cancel'))
+          )
+        ),
         turnNodes.length <= 1 ? React.createElement('div', { className: 'mtx-empty' }, t('empty')) : null,
         React.createElement('a', {
           className: 'mtx-link',
@@ -2037,6 +2182,14 @@ return {
           hint: t('stopOnEditHint'),
           checked: prefs.stopOnEdit,
           onChange: function (e) { prefsStore.set({ stopOnEdit: e.target.checked }); },
+        }),
+        // The panel's toolbar carries the same switch with a one-line tooltip;
+        // this is where the full explanation lives.
+        React.createElement(Toggle, {
+          label: t('dropForksLabel'),
+          hint: t('dropForksHint'),
+          checked: prefs.dropEmptyForks,
+          onChange: function (e) { prefsStore.set({ dropEmptyForks: e.target.checked }); },
         }),
         React.createElement('div', { className: 'mtx-preview' },
           React.createElement('div', { className: 'mtx-row' },

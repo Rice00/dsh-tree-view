@@ -21,7 +21,7 @@ const VERSIONS = [
   { sessionId: 'session-fork', parentSessionId: 'session-root', createdAt: 3, forkTurn: 15, turns: FORK_TURNS },
 ];
 
-async function mountView(t, prefs, versions = VERSIONS) {
+async function mountView(t, prefs, versions = VERSIONS, fetchImpl) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
     url: 'https://tree-view.test/',
     pretendToBeVisual: true,
@@ -29,7 +29,7 @@ async function mountView(t, prefs, versions = VERSIONS) {
   dom.window.localStorage.setItem('dsh-tree-view:prefs', JSON.stringify(Object.assign({
     rememberPath: true, stopOnEdit: true, dropEmptyForks: true,
   }, prefs)));
-  dom.window.fetch = async () => ({ ok: true, json: async () => ({ versions }) });
+  dom.window.fetch = fetchImpl ?? (async () => ({ ok: true, json: async () => ({ versions }) }));
   const previous = new Map();
   const browserErrors = [];
   dom.window.addEventListener('error', (event) => browserErrors.push(event.error || event.message));
@@ -88,7 +88,18 @@ async function mountView(t, prefs, versions = VERSIONS) {
   const titles = () => [...dom.window.document.querySelectorAll('.mtx-card-title')].map((el) => el.textContent);
   const links = () => [...dom.window.document.querySelectorAll('.mtx-card')]
     .map((el) => ({ id: el.getAttribute('data-id'), parent: el.getAttribute('data-parent') }));
-  return { dom, cardIds, offsets, titles, links };
+  const tools = () => [...dom.window.document.querySelectorAll('.mtx-graph-tools .mtx-tool')];
+  const clickTool = (index) => act(async () => {
+    tools()[index].dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  });
+  const confirmTitle = () => (dom.window.document.querySelector('.mtx-confirm-title') || {}).textContent ?? null;
+  const confirmButtons = () => [...dom.window.document.querySelectorAll('.mtx-confirm .mtx-btn')].map((b) => b.textContent);
+  const clickConfirm = (label) => act(async () => {
+    const button = [...dom.window.document.querySelectorAll('.mtx-confirm .mtx-btn')].find((b) => b.textContent === label);
+    assert.ok(button, 'confirm button ' + label + ' exists');
+    button.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  });
+  return { dom, cardIds, offsets, titles, links, tools, clickTool, confirmTitle, confirmButtons, clickConfirm };
 }
 
 test('the switch decides whether a photocopy is drawn, and the layout stays sane', async (t) => {
@@ -139,6 +150,37 @@ const GAPPED_VERSIONS = [
     turns: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20].map((turn) => ({ turn, text: 'fork ' + turn, time: turn })),
   },
 ];
+
+test('the toolbar says what it does in a line, and asks before stopping work', async (t) => {
+  const posts = [];
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, async (url, options) => {
+    if (options && options.method === 'POST') {
+      const payload = JSON.parse(options.body);
+      posts.push(payload);
+      if (payload.action === 'demoteOthers' && payload.stopRunning !== true) {
+        return { ok: false, status: 409, json: async () => ({ error: 'busy', busy: ['session-fork'] }) };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    return { ok: true, json: async () => ({ versions: VERSIONS }) };
+  });
+
+  const labels = view.tools().map((el) => el.getAttribute('title'));
+  assert.equal(labels.length, 4, 'filter, collect, fit, refresh');
+  assert.ok(labels[0].length <= 24, 'the filter tooltip is a line, not a paragraph: ' + labels[0]);
+  assert.ok(view.tools()[0].querySelector('svg'), 'the filter uses an icon, not a punctuation mark');
+  assert.ok(view.tools()[1].querySelector('svg'), 'and so does collect');
+
+  await view.clickTool(1);
+  assert.ok(posts.some((p) => p.action === 'demoteOthers'), 'collect asks the host');
+  assert.ok(!posts.some((p) => p.stopRunning === true), 'and does not stop anything before the user says so');
+  assert.ok(view.confirmTitle() !== null, 'a running branch is a question, not a silent kill');
+  assert.deepEqual(view.confirmButtons(), ['Stop and collect', 'Cancel']);
+
+  await view.clickConfirm('Stop and collect');
+  assert.ok(posts.some((p) => p.action === 'demoteOthers' && p.stopRunning === true), 'confirmed, it stops and collects');
+  assert.equal(view.confirmTitle(), null, 'and the question goes away');
+});
 
 test('a gap in the turn numbering does not orphan the chain', async (t) => {
   const shown = await mountView(t, { dropEmptyForks: true }, GAPPED_VERSIONS);
