@@ -253,43 +253,16 @@ test('the restore does not fire twice in one page load', async (t) => {
   assert.deepEqual(chat.opened, ['session-branch'], 'and not again on the next visit');
 });
 
-// Collecting the branch you leave is the one thing here that writes: it archives
-// a session, so it is off until the setting says otherwise.
-const collectOn = { v: 2, rememberPath: false, autoCollectPrevious: true };
-const collectOff = { v: 2, rememberPath: false };
-const bodies = (chat) => chat.posts.map((p) => JSON.parse(p.body));
-
-test('collecting the branch you leave is off unless asked for', async (t) => {
-  const chat = await mountChat(t, { prefs: collectOff });
+// Collecting the version you leave now happens only where the reader switches on
+// purpose: a node in the tree, or the ‹ › ring. The app moving you — a fork, a
+// sidebar click, the restore above — must never archive anything, so this pins
+// that the chat view's session transition is not a collector any more.
+test('the app moving you between versions archives nothing', async (t) => {
+  const chat = await mountChat(t, { prefs: { v: 2, rememberPath: false } });
 
   await chat.render('session-branch');
   await chat.render('session-branch2');
-  assert.deepEqual(bodies(chat), [], 'with the switch off the plugin archives nothing by itself');
+  assert.deepEqual(chat.posts.map((p) => JSON.parse(p.body)), [],
+    'a session transition is not a switch the reader asked for');
 });
 
-test('with the switch on, the branch you leave is collected', async (t) => {
-  const chat = await mountChat(t, { prefs: collectOn });
-
-  await chat.render('session-branch');
-  await chat.render('session-branch2');
-  assert.deepEqual(bodies(chat), [{ action: 'demote', sessionId: 'session-branch' }],
-    'the branch you left went back into the tree');
-});
-
-test('the entry moves with you: the conversation is collected like any other', async (t) => {
-  const chat = await mountChat(t, { prefs: collectOn });
-
-  await chat.render('session-root');
-  await chat.render('session-branch');
-  assert.deepEqual(bodies(chat), [{ action: 'demote', sessionId: 'session-root' }],
-    'one entry per conversation means the entry follows the version you open — and that version is never the one collected');
-});
-
-test('a branch that is still generating a reply is left alone', async (t) => {
-  const chat = await mountChat(t, { prefs: collectOn, runningBranch: true });
-
-  await chat.render('session-branch');
-  await chat.render('session-branch2');
-  assert.deepEqual(bodies(chat), [],
-    'archiving mid-turn would hide work that is still arriving, so it is skipped');
-});

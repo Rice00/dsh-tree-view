@@ -169,10 +169,6 @@ const PREFS_DEFAULTS = {
   // On by default, because a photocopy drawn as a branch doubles the canvas; the
   // switch in the Tree panel is there for when you want to see them anyway.
   dropEmptyForks: true,
-  // Put the branch you just left back into the tree, so a family keeps one
-  // sidebar entry. Off by default: it archives a session, and archiving one
-  // without being asked is not a favour.
-  autoCollectPrevious: false,
   // Straight stretches longer than this fold into a single node (0 = never
   // fold). That covers the shared history above the first fork and the
   // unbranched run any one branch continues on. A fold node unfolds again, and
@@ -496,29 +492,28 @@ async function openVersionTarget(sessions, v) {
 }
 
 /**
- * Put the version you leave back into the tree, when the setting asks for it, so
- * a conversation keeps one sidebar entry.
+ * Put the version you leave back into the tree, so a conversation keeps one
+ * sidebar entry.
  *
- * Called wherever a switch actually happens — a click in the tree, the ‹ › ring,
- * or the app moving you between two versions. It used to hang off the chat view's
- * session transition alone, and that transition is invisible while the Tree tab is
- * in front, which is exactly where those clicks come from: the switch never fired
- * for the flow it exists for.
+ * Called at the two switches the reader makes on purpose: opening another node in
+ * the tree, and the ‹ › ring under a bubble. Both are "show me that version", and
+ * both leave one behind. Nothing else collects on its own — not the app moving
+ * you (a fork, a sidebar click) and not the chat view's session transition, which
+ * is invisible while the Tree tab is in front anyway.
  *
- * The version being opened is never collected, an archived one has nothing left
- * to collect, and one that is still generating a reply is left alone — archiving
- * mid-turn would hide work that is still arriving. The conversation itself is fair
- * game: the entry you leave moves to the version you open, and there is always one
- * because the version you are reading is never the one collected.
+ * A click inside the conversation you are already reading is not a switch, so the
+ * caller passes the same session for both ends and nothing happens. The version
+ * being opened is never collected; an archived one has nothing left to collect;
+ * one that is still generating a reply is left alone, because archiving mid-turn
+ * would hide work that is still arriving.
  */
 function collectLeftVersion(sessions, left, target, versions) {
-  if (!prefsStore.get().autoCollectPrevious) return;
   if (!left || left === target) return;
   const list = versions || [];
   const entry = list.find(function (v) { return v.sessionId === left; });
   if (!entry || entry.archived || entry.deleted || entry.running === true) return;
   // Only ever inside one family: leaving a conversation for another one is not a
-  // branch switch.
+  // version switch.
   if (rootOf(list, left) !== rootOf(list, target)) return;
   mutate({ action: 'demote', sessionId: left })
     .then(function () { treeStore.load(target); })
@@ -1187,8 +1182,9 @@ const CSS = [
 
   /* ---- settings section ------------------------------------------------ */
   '.mtx-set{display:flex;flex-direction:column;gap:12px;max-width:560px;font-size:14px;color:var(--dsw-alias-label-primary)}',
+  '.mtx-set-intro{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#888);padding-bottom:2px}',
   '.mtx-set-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
-  '.mtx-set-label{font-size:13px}',
+  '.mtx-set-label{font-size:13px;font-weight:600}',
   '.mtx-select{border-radius:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--dsw-alias-bg-primary,rgba(30,30,34,.6));color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;padding:6px 10px;outline:none;cursor:pointer}',
   '.mtx-set-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}',
   '.mtx-preview{margin-top:2px;padding:18px 16px 16px;border-radius:12px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 7%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 16%,transparent);pointer-events:none}',
@@ -1257,8 +1253,9 @@ return {
         fit: 'Center view',
         empty: 'No versions yet — edit any of your messages to branch this conversation. Drag to pan, scroll to zoom.',
         images: '{count} image(s) kept as-is',
-        nav: 'Tree view',
-        styleLabel: 'Edit interface style',
+        nav: 'TreeView',
+        setIntro: 'Branching, the version tree, and the message controls this plugin adds. Everything here applies immediately.',
+        styleLabel: 'Message control style',
         styleHint: 'Where the message controls sit and which ones appear. Changes apply live.',
         style_chatgpt: 'ChatGPT',
         style_deepseek: 'DeepSeek',
@@ -1268,10 +1265,10 @@ return {
         styleDesc_claude: 'Retry, edit and copy under the bubble, revealed on hover. Cancel and Save sit below the editor.',
         deletedVersion: 'Deleted version',
         archivedTag: 'Archived',
-        rememberPathLabel: 'Jump back to the branch I last had open',
-        rememberPathHint: 'Off by default: the conversation you click is the conversation you get, and this plugin never switches sessions on its own. On, coming back to a family from another conversation opens the branch you last had open in it — but only a branch the sidebar is listing, and never on a page load or when you moved inside the family yourself.',
-        stopOnEditLabel: 'Stop the running reply when I edit',
-        stopOnEditHint: 'Editing or retrying cancels every reply still being generated in this conversation before branching, including other versions, so no superseded answer keeps spending tokens. This also lets you edit mid-reply. Off leaves them running.',
+        rememberPathLabel: 'Open the version I was last reading',
+        rememberPathHint: 'Off by default: the conversation you click is the conversation you get. On, coming back to a family from another conversation opens the version you had open in it — never on a page load, never when you moved inside the family yourself, and never for a version the sidebar is not listing.',
+        stopOnEditLabel: 'Stop the reply that is still being written',
+        stopOnEditHint: 'Editing or retrying cancels every reply still being generated in that conversation — other versions included — before branching, so a superseded answer stops spending tokens. It also lets you edit mid-reply. Off leaves them running.',
         renamePrompt: 'Rename this branch',
         renameHint: 'Right-click to rename this branch',
         renameEmptyHint: 'Leave it empty to clear the name',
@@ -1279,20 +1276,19 @@ return {
         menuHint: 'Right-click for branch actions',
         copyBranch: 'Forked copy',
         forkedAt: 'forked at turn {turn}',
-        dropForksLabel: 'Hide content-less forks',
-        dropForksHint: 'A fork that only copied this conversation is not drawn.',
+        dropForksLabel: 'Hide forks with no new turns',
+        dropForksHint: 'A fork that only copied this conversation and never added a turn of its own is not drawn. The Tree toolbar has the same switch, for when you want to see them.',
+        dropForksTool: 'Hide empty forks',
         foldTurns: '{count} shared turns',
         foldRun: '{count} turns in a row',
         foldExpandHint: 'Click to unfold these turns',
         foldCollapse: 'Fold long stretches',
         foldExpand: 'Unfold long stretches',
         foldNothing: 'Nothing long enough to fold',
-        foldSharedLabel: 'Fold long stretches',
-        foldSharedHint: 'The turns every branch has in common, and any unbranched run a single branch continues on, are drawn as one node once that many of them are hidden. Click that node (or the toolbar button) to unfold them again. "Never" leaves them drawn; the toolbar can still fold them by hand.',
+        foldSharedLabel: 'Fold long straight stretches',
+        foldSharedHint: 'The turns every branch has in common, and any unbranched run a single branch continues on, are drawn as one node once that many of them are hidden. Click that node — or the toolbar button — to unfold them again. "Never" leaves them drawn.',
         foldSharedOff: 'Never',
         foldSharedAt: '{count} or more turns',
-        autoCollectLabel: 'Put the version I leave back into the tree',
-        autoCollectHint: 'Switching to another version of the same conversation collects the one you were reading — by clicking a node in the tree, by the ‹ › ring, or when the app moves you — so the sidebar keeps one entry per conversation. The version you open is never collected, so that entry always exists; a version that is still generating a reply is skipped. Off by default.',
         collectOthers: 'Collect every other branch',
         collectRunning: 'Running branches: {count}. Stop them and collect them into the tree?',
         collectStop: 'Confirm',
@@ -1326,8 +1322,9 @@ return {
         fit: '居中显示',
         empty: '还没有版本——编辑任意一条你的消息即可创建分支。拖动平移，滚轮缩放。',
         images: '{count} 张图片将原样保留',
-        nav: '消息树',
-        styleLabel: '编辑界面风格',
+        nav: 'TreeView',
+        setIntro: '这里管这个插件新增的能力：消息分支、版本树，以及气泡上的操作按钮。改动即时生效。',
+        styleLabel: '消息操作样式',
         styleHint: '消息操作按钮的位置与种类。修改即时生效。',
         style_chatgpt: 'ChatGPT',
         style_deepseek: 'DeepSeek',
@@ -1337,10 +1334,10 @@ return {
         styleDesc_claude: '气泡下方为重试、编辑与复制，悬停时显示；「取消 / 保存」位于编辑框下方。',
         deletedVersion: '已删除的版本',
         archivedTag: '已归档',
-        rememberPathLabel: '自动跳回上次那条分支',
-        rememberPathHint: '默认关闭：你点哪个会话就打开哪个会话，插件从不自己切换会话。开启后，只有「你从别的会话点进这个家族」并且「那条分支仍在侧栏里」时才会跳过去 —— 页面刚加载、或你在家族内部自己走动时，都不会跳。',
-        stopOnEditLabel: '编辑时中止正在生成的回复',
-        stopOnEditHint: '编辑或重试时，先取消该会话中所有仍在生成的回复（包括其它版本）再分支，避免被取代的回答继续消耗额度；同时允许在回复过程中直接编辑。关闭后它们会继续跑完。',
+        rememberPathLabel: '打开我上次在读的那条版本',
+        rememberPathHint: '默认关闭：点哪个会话就打开哪个会话。开启后，从别的会话回到这个家族时，会打开你上次读的那条版本 —— 页面刚加载、你在家族内自己走动、或那条版本已不在侧栏时，都不会跳。',
+        stopOnEditLabel: '先停掉还在生成的回复',
+        stopOnEditHint: '编辑或重试时，先取消该会话里所有仍在生成的回复（含其它版本）再分支，避免被取代的回答继续消耗额度；同时允许在回复过程中直接编辑。关闭则让它们跑完。',
         renamePrompt: '重命名这个分支',
         renameHint: '右键重命名该分支',
         renameEmptyHint: '留空即清除名字',
@@ -1348,20 +1345,19 @@ return {
         menuHint: '右键打开分支操作',
         copyBranch: '分叉副本',
         forkedAt: '分叉于第 {turn} 轮',
-        dropForksLabel: '剔除空 Fork',
-        dropForksHint: '只复制了本对话、自己没聊出新内容的 Fork 不画出来。',
+        dropForksLabel: '不画没有新内容的副本',
+        dropForksHint: '只复制了本对话、自己没聊出新内容的 Fork 不画出来；Tree 工具栏上有同一个开关，想看得时候随手打开。',
+        dropForksTool: '不画空副本',
         foldTurns: '共用历史 · {count} 轮',
         foldRun: '连续 {count} 轮',
         foldExpandHint: '点击展开这几轮',
         foldCollapse: '折叠长段',
         foldExpand: '展开长段',
         foldNothing: '没有长到需要折叠的连续轮次',
-        foldSharedLabel: '折叠长段',
-        foldSharedHint: '「每个分支都一样的开头」以及「一条分支一路直下、中途没有分叉的连续轮次」，隐藏轮数达到这个值时折成一个节点。点那个节点（或工具栏的折叠按钮）即可展开。选「永不」则一直画全；工具栏仍可手动折叠。',
+        foldSharedLabel: '折叠过长的连续轮次',
+        foldSharedHint: '「每个分支都一样的开头」以及「一条分支一路直下、中途没有分叉的连续轮次」，隐藏轮数达到这里选的值就折成一个节点；点那个节点（或工具栏按钮）即可展开。「永不」则一直画全。',
         foldSharedOff: '永不',
         foldSharedAt: '{count} 轮及以上',
-        autoCollectLabel: '切换时收起我离开的那条',
-        autoCollectHint: '切到同一对话的另一条版本时，把你刚在看的收进 Tree —— 在树里点节点、用气泡下的 ‹ › 环、或应用自己把你切过去，都算。你正要打开的那条永远不会被收（所以侧栏始终有入口）；正在生成回复的那条会被跳过。默认关闭。',
         collectOthers: '收起其它分支',
         collectRunning: '有 {count} 个分支正在运行，要结束并归档收起吗？',
         collectStop: '确认',
@@ -1535,12 +1531,6 @@ return {
         if (!root) return;
         const arrivedFrom = lastViewedSessionId;
         lastViewedSessionId = sessionId;
-        // The app moving you between two versions of one conversation is a branch
-        // switch like any other, so it collects the one you leave when the
-        // setting asks for it.
-        if (arrivedFrom !== undefined && arrivedFrom !== sessionId) {
-          collectLeftVersion(sessions, arrivedFrom, sessionId, versions);
-        }
         if (sessionId !== root) {
           // Arrived at a branch: that is now the remembered view, and any
           // restore we kicked off has landed.
@@ -2060,8 +2050,10 @@ return {
         if (!sessions) return;
         const v = versions.find(function (item) { return item.sessionId === node.sessionId; });
         if (!v) return;
-        // The switch the setting is about, at the moment it happens: opening
-        // another version puts the one you were reading back into the tree.
+        // A node of another version is a switch: put the one you were reading
+        // back into the tree. A node of the version already on screen is not —
+        // `collectLeftVersion` sees the same session at both ends and does
+        // nothing, which is exactly the rule.
         collectLeftVersion(sessions, sessionId, v.sessionId, versions);
         openVersionTarget(sessions, v);
         showChat();
@@ -2455,7 +2447,7 @@ return {
             className: 'mtx-tool',
             'data-on': prefs.dropEmptyForks ? '' : undefined,
             'aria-pressed': prefs.dropEmptyForks ? 'true' : 'false',
-            title: t('dropForksLabel'),
+            title: t('dropForksTool'),
             onClick: function () { prefsStore.set({ dropEmptyForks: !prefs.dropEmptyForks }); },
           }, ForkIcon({ filtered: prefs.dropEmptyForks })),
           React.createElement('button', {
@@ -2535,6 +2527,7 @@ return {
       const style = useStyle();
       const prefs = usePrefs();
       return React.createElement('div', { className: 'mtx-set' },
+        React.createElement('div', { className: 'mtx-set-intro' }, t('setIntro')),
         React.createElement('div', { className: 'mtx-set-row' },
           React.createElement('span', { className: 'mtx-set-label' }, t('styleLabel')),
           React.createElement('select', {
@@ -2566,12 +2559,6 @@ return {
           hint: t('dropForksHint'),
           checked: prefs.dropEmptyForks,
           onChange: function (e) { prefsStore.set({ dropEmptyForks: e.target.checked }); },
-        }),
-        React.createElement(Toggle, {
-          label: t('autoCollectLabel'),
-          hint: t('autoCollectHint'),
-          checked: prefs.autoCollectPrevious,
-          onChange: function (e) { prefsStore.set({ autoCollectPrevious: e.target.checked }); },
         }),
         React.createElement('div', { className: 'mtx-set-row' },
           React.createElement('span', { className: 'mtx-set-label' }, t('foldSharedLabel')),

@@ -422,12 +422,12 @@ test('a long run on one branch folds too, not only the shared history', async (t
   assert.ok(view.cardIds().includes('session-root#t1'), 'the short shared run stays drawn throughout');
 });
 
-test('clicking another node collects the version you were reading', async (t) => {
+test('clicking a node of another version collects the one you were reading', async (t) => {
   // Reported: clicking a node never put the previous one away. The switch used to
   // hang off the chat view's session transition, which is not happening while the
   // Tree tab is in front — so the flow it exists for never fired.
   const posts = [];
-  const view = await mountView(t, { dropEmptyForks: true, autoCollectPrevious: true }, VERSIONS,
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS,
     async (url, options) => {
       if (options && options.method === 'POST') {
         posts.push(JSON.parse(options.body));
@@ -441,7 +441,9 @@ test('clicking another node collects the version you were reading', async (t) =>
     'the version the tree was showing goes back into the tree');
 });
 
-test('and collects nothing while the switch is off', async (t) => {
+test('clicking a node inside the version on screen collects nothing', async (t) => {
+  // The rule asked for: only a node that is NOT in the active conversation is a
+  // switch. This one is a turn of the version already open.
   const posts = [];
   const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, async (url, options) => {
     if (options && options.method === 'POST') {
@@ -451,8 +453,24 @@ test('and collects nothing while the switch is off', async (t) => {
     return { ok: true, json: async () => ({ versions: VERSIONS }) };
   }, 'session-fork');
 
+  await view.clickCard('session-fork#t17');
+  assert.deepEqual(posts, [], 'no switch happened, so nothing is put away');
+});
+
+test('a version that is still generating a reply is left alone', async (t) => {
+  const running = VERSIONS.map((v) => (v.sessionId === 'session-fork' ? Object.assign({}, v, { running: true }) : v));
+  const posts = [];
+  const view = await mountView(t, { dropEmptyForks: true }, running, async (url, options) => {
+    if (options && options.method === 'POST') {
+      posts.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    return { ok: true, json: async () => ({ versions: running }) };
+  }, 'session-fork');
+
   await view.clickCard('session-root#root');
-  assert.deepEqual(posts, [], 'off by default: nothing is archived by a click');
+  assert.deepEqual(posts, [],
+    'archiving mid-turn would hide work that is still arriving, so it is skipped');
 });
 
 test('a family with nothing worth folding keeps the control out of the way', async (t) => {

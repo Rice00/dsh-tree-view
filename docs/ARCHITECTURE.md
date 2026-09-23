@@ -59,7 +59,7 @@ Because DSH session event logs are append-only without native in-session branchi
 - Runs in the browser / renderer process.
 - Injects a shadowed `user` message renderer at priority `-1` to add the edit/copy/retry toolbar and `‹ n/m ›` version ring without modifying agent responses, tool calls, or reasoning blocks.
 - Adds the **Versions** tab (`VIEW_ORDER: 16`) providing an interactive pan/zoom graph with spring physics.
-- Adds settings options in **Settings → Message Edit** with live layout switching (ChatGPT, DeepSeek, Claude styles).
+- Adds settings options in **Settings → TreeView** with live layout switching (ChatGPT, DeepSeek, Claude styles).
 
 ---
 
