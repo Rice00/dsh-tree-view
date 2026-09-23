@@ -46,6 +46,8 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(dom.window.document.getElementById('root'));
   const disposers = [];
+  const opened = [];
+  const tabClicks = [];
   t.after(async () => {
     await act(async () => root.unmount());
     for (const dispose of disposers.reverse()) dispose();
@@ -73,7 +75,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
       if (name === 'slots') return slots;
       if (name === 'sessions') {
         return {
-          open: () => {},
+          open: (id) => { opened.push(id); },
           list: {
             subscribe: () => () => {},
             getSnapshot: () => ({ byId: Object.fromEntries(versions.map((v) => [v.sessionId, { id: v.sessionId }])) }),
@@ -85,6 +87,13 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
   });
   assert.equal(typeof view, 'function');
+  // The conversation area always has a Chat tab first; showChat() brings it
+  // forward, and these tests watch that click land.
+  const chatTab = dom.window.document.createElement('div');
+  chatTab.setAttribute('role', 'tab');
+  chatTab.setAttribute('aria-selected', 'false');
+  chatTab.addEventListener('click', () => { tabClicks.push(true); });
+  dom.window.document.body.appendChild(chatTab);
   await act(async () => { root.render(React.createElement(view, { sessionId: viewSessionId })); });
   await act(async () => { await Promise.resolve(); });
   const cardIds = () => [...dom.window.document.querySelectorAll('.mtx-card')].map((el) => el.getAttribute('data-id'));
@@ -132,6 +141,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   return {
     dom, cardIds, offsets, titles, links, tools, clickTool, clickCard, foldCard,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
+    opened, tabClicks,
   };
 }
 
@@ -422,55 +432,68 @@ test('a long run on one branch folds too, not only the shared history', async (t
   assert.ok(view.cardIds().includes('session-root#t1'), 'the short shared run stays drawn throughout');
 });
 
-test('clicking a node of another version collects the one you were reading', async (t) => {
-  // Reported: clicking a node never put the previous one away. The switch used to
-  // hang off the chat view's session transition, which is not happening while the
-  // Tree tab is in front — so the flow it exists for never fired.
-  const posts = [];
-  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS,
-    async (url, options) => {
-      if (options && options.method === 'POST') {
-        posts.push(JSON.parse(options.body));
-        return { ok: true, json: async () => ({ ok: true }) };
-      }
-      return { ok: true, json: async () => ({ versions: VERSIONS }) };
-    }, 'session-fork');
-
-  await view.clickCard('session-root#root');
-  assert.deepEqual(posts, [{ action: 'demote', sessionId: 'session-fork' }],
-    'the version the tree was showing goes back into the tree');
-});
-
-test('clicking a node inside the version on screen collects nothing', async (t) => {
-  // The rule asked for: only a node that is NOT in the active conversation is a
-  // switch. This one is a turn of the version already open.
-  const posts = [];
-  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, async (url, options) => {
+// The swap rule, in the form it was asked for: bringing a version that is
+// collected in the tree back out puts the one you were reading away; a version
+// that is already in the main chat just opens; a node of the version on screen
+// only returns to the Chat tab.
+function withArchived(sessionIds) {
+  return VERSIONS.map((v) => (sessionIds.includes(v.sessionId) ? Object.assign({}, v, { archived: true }) : v));
+}
+function recording(posts, versions) {
+  return async (url, options) => {
     if (options && options.method === 'POST') {
       posts.push(JSON.parse(options.body));
       return { ok: true, json: async () => ({ ok: true }) };
     }
-    return { ok: true, json: async () => ({ versions: VERSIONS }) };
-  }, 'session-fork');
+    return { ok: true, json: async () => ({ versions }) };
+  };
+}
+
+test('bringing a collected version back out puts the current one away', async (t) => {
+  const posts = [];
+  const versions = withArchived(['session-root']);
+  const view = await mountView(t, { dropEmptyForks: true }, versions, recording(posts, versions), 'session-fork');
+
+  await view.clickCard('session-root#root');
+  assert.ok(posts.some((p) => p.action === 'demote' && p.sessionId === 'session-fork'),
+    'the version you were reading goes back into the tree: ' + JSON.stringify(posts));
+  assert.ok(posts.some((p) => p.action === 'activate' && p.sessionId === 'session-root'),
+    'and the one you clicked is brought out of it');
+  assert.ok(view.opened.includes('session-root'), 'then it is opened');
+});
+
+test('a version already in the main chat just opens — nothing is put away', async (t) => {
+  // Reported: a node that had been moved to the main chat still collected the
+  // current conversation. It must not: that node is there on purpose.
+  const posts = [];
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, recording(posts, VERSIONS), 'session-fork');
+
+  await view.clickCard('session-root#root');
+  assert.deepEqual(posts, [], 'no archiving, no unarchiving');
+  assert.ok(view.opened.includes('session-root'), 'it just opens');
+});
+
+test('a node of the version on screen only goes back to the Chat tab', async (t) => {
+  const posts = [];
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, recording(posts, VERSIONS), 'session-fork');
 
   await view.clickCard('session-fork#t17');
-  assert.deepEqual(posts, [], 'no switch happened, so nothing is put away');
+  assert.deepEqual(posts, [], 'nothing is archived and nothing is brought out');
+  assert.deepEqual(view.opened, [], 'and the app is not asked to navigate anywhere');
+  assert.equal(view.tabClicks.length, 1, 'the Chat tab is brought forward instead');
 });
 
 test('a version that is still generating a reply is left alone', async (t) => {
-  const running = VERSIONS.map((v) => (v.sessionId === 'session-fork' ? Object.assign({}, v, { running: true }) : v));
+  const versions = withArchived(['session-root'])
+    .map((v) => (v.sessionId === 'session-fork' ? Object.assign({}, v, { running: true }) : v));
   const posts = [];
-  const view = await mountView(t, { dropEmptyForks: true }, running, async (url, options) => {
-    if (options && options.method === 'POST') {
-      posts.push(JSON.parse(options.body));
-      return { ok: true, json: async () => ({ ok: true }) };
-    }
-    return { ok: true, json: async () => ({ versions: running }) };
-  }, 'session-fork');
+  const view = await mountView(t, { dropEmptyForks: true }, versions, recording(posts, versions), 'session-fork');
 
   await view.clickCard('session-root#root');
-  assert.deepEqual(posts, [],
+  assert.ok(!posts.some((p) => p.action === 'demote'),
     'archiving mid-turn would hide work that is still arriving, so it is skipped');
+  assert.ok(posts.some((p) => p.action === 'activate' && p.sessionId === 'session-root'),
+    'the version you clicked is still brought out');
 });
 
 test('a family with nothing worth folding keeps the control out of the way', async (t) => {

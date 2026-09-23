@@ -492,25 +492,28 @@ async function openVersionTarget(sessions, v) {
 }
 
 /**
- * Put the version you leave back into the tree, so a conversation keeps one
- * sidebar entry.
+ * The main-chat swap, decided in one place.
  *
- * Called at the two switches the reader makes on purpose: opening another node in
- * the tree, and the ‹ › ring under a bubble. Both are "show me that version", and
- * both leave one behind. Nothing else collects on its own — not the app moving
- * you (a fork, a sidebar click) and not the chat view's session transition, which
- * is invisible while the Tree tab is in front anyway.
- *
- * A click inside the conversation you are already reading is not a switch, so the
- * caller passes the same session for both ends and nothing happens. The version
- * being opened is never collected; an archived one has nothing left to collect;
- * one that is still generating a reply is left alone, because archiving mid-turn
- * would hide work that is still arriving.
+ * Switching versions is a swap of which one sits in the main chat, and the sidebar
+ * entry goes with it: opening a version that is currently collected in the tree
+ * brings it back out and puts the one you were reading away. Opening a version that
+ * is already in the main chat changes nothing — the reader put it there on purpose,
+ * and a click on it is just "show me that one". A click inside the version already
+ * on screen is not a switch at all.
  */
+function swapOnVersionSwitch(sessions, left, version, versions) {
+  if (!version || !left || version.sessionId === left) return;
+  if (version.archived !== true) return;
+  collectLeftVersion(sessions, left, version.sessionId, versions);
+}
+
 function collectLeftVersion(sessions, left, target, versions) {
   if (!left || left === target) return;
   const list = versions || [];
   const entry = list.find(function (v) { return v.sessionId === left; });
+  // An archived version has nothing left to collect, and one that is still
+  // generating a reply is left alone: archiving mid-turn would hide work that is
+  // still arriving.
   if (!entry || entry.archived || entry.deleted || entry.running === true) return;
   // Only ever inside one family: leaving a conversation for another one is not a
   // version switch.
@@ -1485,7 +1488,8 @@ return {
       const go = function (delta) {
         const next = ring.alternatives[ring.index + delta];
         if (!next) return;
-        collectLeftVersion(sessions, props.sessionId, next.sessionId, props.versions);
+        // The ring is the same switch, so it follows the same swap rule.
+        swapOnVersionSwitch(sessions, props.sessionId, next, props.versions);
         openVersionTarget(sessions, next);
       };
       return React.createElement('div', { className: 'mtx-ring' },
@@ -2050,11 +2054,18 @@ return {
         if (!sessions) return;
         const v = versions.find(function (item) { return item.sessionId === node.sessionId; });
         if (!v) return;
-        // A node of another version is a switch: put the one you were reading
-        // back into the tree. A node of the version already on screen is not —
-        // `collectLeftVersion` sees the same session at both ends and does
-        // nothing, which is exactly the rule.
-        collectLeftVersion(sessions, sessionId, v.sessionId, versions);
+        // A node of the version already on screen is not a switch: it only takes
+        // you back to the Chat tab and puts it at that turn. Nothing is collected
+        // and nothing is brought out.
+        if (v.sessionId === sessionId) {
+          showChat();
+          if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
+          return;
+        }
+        // Anything else is a swap: a version that is collected in the tree comes
+        // back out, and the one you were reading goes in. A version already in the
+        // main chat just opens.
+        swapOnVersionSwitch(sessions, sessionId, v, versions);
         openVersionTarget(sessions, v);
         showChat();
         if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);

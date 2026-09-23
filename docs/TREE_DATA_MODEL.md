@@ -116,6 +116,27 @@ hidden inside a fold.
 - Folding is a client-side view decision, not a data change: `buildTurnTree` still returns
   the full tree, and `foldLongRuns(nodes, threshold)` is applied on top of it.
 
+### 2.7 Version Switch = Main-Chat Swap (`swapOnVersionSwitch`)
+*Location: [`plugin.client.js`](../plugin.client.js)*
+
+Versions are whole sessions, and exactly one of them is the conversation's entry in the
+sidebar. Switching versions swaps which one that is, and archive membership is what
+expresses it — there is no extra state:
+
+- Target **collected in the tree** (archived): bring it out (`activate`) and put the version
+  you were reading away (`demote`). The conversation keeps one entry, and it follows you.
+- Target **already in the main chat** (not archived): just open it. Nothing is archived and
+  nothing is brought out — the reader put it there on purpose.
+- Target **is the version on screen**: not a switch at all. Only the Chat tab is brought
+  forward and the turn is flashed; no archive call of either kind is made.
+
+Called from the two switches the reader makes on purpose: a node click in the tree and the
+`‹ ›` ring under a bubble. The chat view's session transition deliberately does **not**
+collect, so a fork, a sidebar click or the last-viewed-version restore cannot archive
+anything behind the reader's back. Two protections remain on the version being collected: an
+archived one has nothing to collect, and one that is still generating a reply is skipped,
+because archiving mid-turn would hide work that is still arriving.
+
 ---
 
 ## 3. Graph Layout & Springs

@@ -22,7 +22,7 @@ Edit a message you already sent and the conversation **rewinds and branches** fr
 | **Shared turns merged**: a fork's copied turns are the same nodes as its parent's | done |
 | **Capability probe + archive adapter** (degrade loudly, never silently) | done |
 | **Long-stretch folding**: the stretch every branch has in common, and any unbranched run a single branch continues on, fold into one node past a threshold and open again when clicked (the toolbar folds and unfolds by hand too; the threshold counts each run on its own) | done |
-| **Collect the version you leave** when you switch (no switch: clicking a node of another version, or the ‹ › ring, collects the one you were reading; a node inside the version already open collects nothing; a reply still generating is skipped) | done |
+| **The main-chat swap** (no switch): clicking a node that is collected in the tree brings it back out and puts the one you were reading away; clicking one that is already in the main chat just opens it; clicking a node of the version on screen only returns to the Chat tab | done |
 | A truncated "last N turns" view | open |
 
 ![demo](https://raw.githubusercontent.com/Rice00/dsh-tree-view/main/assets/demo.gif)
