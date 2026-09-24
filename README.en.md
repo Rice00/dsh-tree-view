@@ -30,10 +30,12 @@ Use a conversation as a tree view in DeepSeek Harness: edit an old message and t
 | ✋ **Your sessions are never collected behind your back** | Editing, retrying, opening a session from the sidebar, restoring where you last read — none of them touches an archived flag. Only picking a version from the tree moves the slot. |
 | 🗂️ **Long stretches fold themselves** | A run of turns that offers no choice folds into a stack of offset sheets whose colour follows state; the threshold is counted per stretch, so a short one is never folded because a long one sits next to it. |
 | 👁️ **What you need stays visible** | The start of the conversation, fork points, the end of a line, and the turn you are generating right now never fold away. |
+| 🤖 **Subagent conversations are labelled** | A subagent hangs its session under your conversation, which the tree would otherwise draw as a version of your message; those cards carry a subagent tag so they read as what they are. |
 | ♻️ **Collect and put back, always reversible** | Both just flip the archived state: no session is created, copied, or deleted. |
 | ⚙️ **Every switch in one place** | Settings → **TreeView**, five items, each described in the panel and previewed live. |
 | 🔒 **A view, not a rewrite** | Drawing the tree, swapping the slot and folding are all client-side behaviour; not one byte of the session log changes. |
 | 🧩 **Coexists with upstream** | Row id `tree-view`, route `/tree-view`; the durable event type stays upstream's `message-tree/version`, so sessions already branched there read as trees here. |
+| 🎨 **Follows the DSH theme** | Surface, border, accent, state and even shadow colours come from tokens the host actually defines: light follows light, dark follows dark, with no hardcoded dark value left. |
 
 ## Install
 
@@ -115,7 +117,7 @@ npm run build   # bundle the client half plugin.client.js into lib/client.js
 npm test        # verify the bundle is current, then run every test
 ```
 
-The tests are **behavioural**: the client half is mounted in jsdom through its real slot registrations and driven by real DOM events, asserting card attributes, POST payloads and navigation calls rather than internals. Currently **13 files / 118 assertions**.
+The tests are **behavioural**: the client half is mounted in jsdom through its real slot registrations and driven by real DOM events, asserting card attributes, POST payloads and navigation calls rather than internals. Currently **14 test files / 122 cases**, all green when run here.
 
 ```
 lib/index.js            host half: branching engine, archive adapter, HTTP endpoints
