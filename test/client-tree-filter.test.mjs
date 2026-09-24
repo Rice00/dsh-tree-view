@@ -21,7 +21,7 @@ const VERSIONS = [
   { sessionId: 'session-fork', parentSessionId: 'session-root', createdAt: 3, forkTurn: 15, turns: FORK_TURNS },
 ];
 
-async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId = 'session-root') {
+async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId = 'session-root', catalogue = {}) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
     url: 'https://tree-view.test/',
     pretendToBeVisual: true,
@@ -78,7 +78,12 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
           open: (id) => { opened.push(id); },
           list: {
             subscribe: () => () => {},
-            getSnapshot: () => ({ byId: Object.fromEntries(versions.map((v) => [v.sessionId, { id: v.sessionId }])) }),
+            getSnapshot: () => ({
+              byId: Object.fromEntries(versions.map((v) => [v.sessionId, { id: v.sessionId }])),
+              // DSH keeps a catalogue of subagents per parent session; the tree
+              // reads it when the host payload cannot say (an old host half).
+              subagentsByParent: catalogue ?? {},
+            }),
           },
         };
       }
@@ -404,6 +409,25 @@ test('a subagent conversation is marked as one', async (t) => {
   assert.ok(card.textContent.includes('subagent'), 'the card says so: ' + card.textContent);
   assert.equal(view.dom.window.document.querySelectorAll('.mtx-card[data-subagent]').length, 1,
     'only the subagent conversation is marked');
+});
+
+test('and marks one the host half has not learned about yet', async (t) => {
+  // The host half is loaded by the DSH server, so its new payload field only
+  // arrives after a restart. The app's own subagent catalogue is already in the
+  // client, so a refresh is enough — this is what the reader reported missing.
+  const catalogue = { 'session-root': { entries: [{ kind: 'child', id: 'session-delegate' }] } };
+  const withDelegate = VERSIONS.concat([{
+    sessionId: 'session-delegate',
+    parentSessionId: 'session-root',
+    createdAt: 5,
+    turns: [{ turn: 1, text: 'delegate one', time: 5 }],
+  }]);
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, withDelegate, undefined, 'session-root', catalogue);
+
+  const card = view.dom.window.document.querySelector('.mtx-card[data-id="session-delegate#t1"]');
+  assert.ok(card, 'the subagent conversation is drawn');
+  assert.equal(card.hasAttribute('data-subagent'), true, 'the client catalogue is enough to mark it');
+  assert.ok(card.textContent.includes('subagent'), 'tag and subtitle: ' + card.textContent);
 });
 
 test('a long run on one branch folds too, not only the shared history', async (t) => {

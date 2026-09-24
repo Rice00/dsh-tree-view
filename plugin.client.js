@@ -628,6 +628,13 @@ const SLOT_Y = 132;
 function buildTurnTree(versions, currentSessionId, options) {
   if (!versions || versions.length === 0) return [];
   const dropEmptyForks = !options || options.dropEmptyForks !== false;
+  // Subagent sessions come from two places: the host payload (which only lands
+  // after a DSH restart) and the app's own subagent catalogue, which the client
+  // list already carries. Either one is enough to mark the conversation.
+  const subagentIds = options && options.subagentIds;
+  const isSubagent = function (v) {
+    return v.subagent === true || (subagentIds !== undefined && subagentIds.has(v.sessionId) === true);
+  };
   const kept = versions.filter(function (v) {
     // A fork that copied the history and never added a turn of its own is a
     // photocopy: it doubles the canvas and makes the real history look like it
@@ -736,7 +743,7 @@ function buildTurnTree(versions, currentSessionId, options) {
           onCurrentPath: false,
           deleted: !!v.deleted,
           archived: !!v.archived,
-          subagent: v.subagent === true,
+          subagent: isSubagent(v),
           delegationDepth: v.delegationDepth,
           // Every node of a named version carries the name so the group frame
           // can wrap the whole branch, not just the node where it starts.
@@ -756,7 +763,7 @@ function buildTurnTree(versions, currentSessionId, options) {
         onCurrentPath: false,
         deleted: !!v.deleted,
         archived: !!v.archived,
-        subagent: v.subagent === true,
+        subagent: isSubagent(v),
         delegationDepth: v.delegationDepth,
         versionLabel: v.label || undefined,
       });
@@ -773,7 +780,7 @@ function buildTurnTree(versions, currentSessionId, options) {
         onCurrentPath: false,
         deleted: !!v.deleted,
         archived: !!v.archived,
-        subagent: v.subagent === true,
+        subagent: isSubagent(v),
         delegationDepth: v.delegationDepth,
         versionLabel: v.label || undefined,
       });
@@ -793,7 +800,7 @@ function buildTurnTree(versions, currentSessionId, options) {
           onCurrentPath: false,
           deleted: !!v.deleted,
           archived: !!v.archived,
-          subagent: v.subagent === true,
+          subagent: isSubagent(v),
           delegationDepth: v.delegationDepth,
           // A version's name belongs to every node it owns, so the group frame
           // wraps the whole branch: the fork point and everything it grows
@@ -1258,6 +1265,30 @@ return {
       return sessions && sessions.list && typeof sessions.list.getSnapshot === 'function'
         ? sessions.list.getSnapshot()
         : { byId: {} };
+    }
+
+    /**
+     * The subagent sessions the app knows about, as a set of ids.
+     *
+     * DSH keeps a catalogue of subagents per parent session, and the list snapshot
+     * carries it (`subagentsByParent`). Every entry that is a `child` names the
+     * session it belongs to. This is the same fact the host payload reports as
+     * `subagent: true`; having both means the marking works with an old host half
+     * (which only lands after a DSH restart) and with a new one.
+     */
+    function useSubagentIds() {
+      const list = useSessionList();
+      const catalogue = list && list.subagentsByParent;
+      const ids = new Set();
+      if (catalogue && typeof catalogue === 'object') {
+        for (const group of Object.values(catalogue)) {
+          const entries = group && Array.isArray(group.entries) ? group.entries : [];
+          for (const entry of entries) {
+            if (entry && entry.kind === 'child' && typeof entry.id === 'string') ids.add(entry.id);
+          }
+        }
+      }
+      return ids;
     }
 
     const I18N_NS = 'dsh-tree-view';
@@ -1800,6 +1831,11 @@ return {
       const sessionId = props.sessionId;
       const tree = useTree(sessionId);
       const titles = useSessionList().byId;
+      // The session list knows which sessions are subagents: DSH keeps a catalogue
+      // per parent (`subagentsByParent`) and every entry names its child. The host
+      // payload says so too, but that half only lands after a DSH restart, and a
+      // client-only change should be visible after a refresh.
+      const subagentIds = useSubagentIds();
       const versions = (tree && tree.versions) || [];
       const prefs = usePrefs();
       // What this host can actually do about hiding sessions. A host that lost
@@ -1841,8 +1877,8 @@ return {
       const fittedRef = React.useRef(false);
 
       const fullNodes = React.useMemo(function () {
-        return buildTurnTree(versions, sessionId, { dropEmptyForks: prefs.dropEmptyForks });
-      }, [versions, sessionId, prefs.dropEmptyForks]);
+        return buildTurnTree(versions, sessionId, { dropEmptyForks: prefs.dropEmptyForks, subagentIds: subagentIds });
+      }, [versions, sessionId, prefs.dropEmptyForks, subagentIds]);
 
       // Every long straight stretch of the tree — the shared history above the
       // first fork, and the unbranched run any single branch continues on. Only
