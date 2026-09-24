@@ -149,22 +149,28 @@ test('a subagent conversation in the family is flagged as one', async () => {
   assert.equal(byId.get('session-root').subagent, undefined, 'the conversation itself is not');
 });
 
-test('a side-chat fork archived away from the sidebar is not drawn as a branch', async () => {
+test('an archived fork stays in the tree, marked as archived', async () => {
+  // Reported: a fork made at turn 44 and archived by hand could not be found in
+  // the Tree any more. Archiving is a sidebar action; the tree is where a
+  // conversation's versions live, so it must keep drawing it (dimmed, and
+  // offering to go back into the main chat).
   const get = harness({
-    archived: ['session-side-chat'],
+    archived: ['session-fork'],
     sessions: [
       { id: 'session-root' },
-      { id: 'session-side-chat', parent: 'session-root', createdAt: 10 },
+      { id: 'session-fork', parent: 'session-root', createdAt: 10 },
     ],
   });
   const response = await get('session-root');
   assert.equal(response.status, 200);
-  assert.deepEqual(response.body.versions.map((v) => v.sessionId), ['session-root'],
-    'the archived fork is hidden, so the user sees no branch they never made');
+  const byId = new Map(response.body.versions.map((v) => [v.sessionId, v]));
+  assert.deepEqual([...byId.keys()], ['session-root', 'session-fork'],
+    'the archived fork is still a version of this conversation');
+  assert.equal(byId.get('session-fork').archived, true, 'and the payload says how it is stored');
 
-  const fromSideChat = await get('session-side-chat');
-  assert.deepEqual(fromSideChat.body.versions.map((v) => v.sessionId), ['session-root'],
-    'and asking from the side chat itself still shows the conversation that owns it');
+  const fromFork = await get('session-fork');
+  assert.deepEqual(fromFork.body.versions.map((v) => v.sessionId), ['session-root', 'session-fork'],
+    'asking from the fork itself shows the same family');
 });
 
 test('an archived link with descendants survives, so chains stay connected', async () => {
@@ -190,8 +196,8 @@ test('a version the tree put away stays on the tree, name and all', async () => 
       { id: 'session-branch', parent: 'session-root', createdAt: 10, marker: true },
     ],
   });
-  // "Collect into the tree" archives the branch, exactly as a side chat does —
-  // what separates them is that we recorded the intent.
+  // "Collect into the tree" archives the branch, exactly as the app's own archive
+  // does; what the tree records is its name and that it did the collecting.
   setDemoted(stateFilePath(HOME), 'session-branch', true);
   setLabel(stateFilePath(HOME), 'session-branch', '方案 B');
 
@@ -201,11 +207,12 @@ test('a version the tree put away stays on the tree, name and all', async () => 
   assert.equal(response.body.versions[1].archived, true, 'and it still reports being out of the sidebar');
   assert.equal(response.body.versions[1].label, '方案 B', 'its name survives the round trip');
 
-  // Releasing it (promote) drops the intent; nothing else changes the payload.
+  // Releasing it (promote) drops the intent; the version stays either way, only
+  // its archived flag changes.
   setDemoted(stateFilePath(HOME), 'session-branch', false);
   const after = await get('session-root');
-  assert.deepEqual(after.body.versions.map((v) => v.sessionId), ['session-root'],
-    'once promoted it is an ordinary session again, and a branch only if it has descendants');
+  assert.deepEqual(after.body.versions.map((v) => v.sessionId), ['session-root', 'session-branch'],
+    'a version is drawn whether or not it sits in the sidebar');
 });
 
 test('collecting the others refuses while something runs, then stops and collects', async () => {

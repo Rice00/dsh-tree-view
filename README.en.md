@@ -40,6 +40,7 @@ Switch the conversation panel to Tree and the whole family is drawn on one canva
 | **Highlighted reading path** | The whole line you are reading — shared opening included — is highlighted on the canvas, so where you came from, where you are and where you can still go read off one picture. |
 | **Resume where you left off** | Coming back to this family from another conversation resumes the version you last read (off by default; switchable in Settings). |
 | **Subagent tags** | A subagent session hanging under this conversation carries a tag, so it is not read as one of your versions. |
+| **Archived branches stay** | A version you archive is still drawn, dimmed and marked "archived" — archiving takes an entry out of the sidebar, it does not delete a branch. |
 | **Following the theme** | Surface, border, accent, state and even shadow colours come from the host's theme tokens: light follows light, dark follows dark. |
 
 ## How it works

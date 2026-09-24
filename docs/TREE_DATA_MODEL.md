@@ -161,6 +161,25 @@ collapsing subagent conversations is a separate decision, not taken here.
 
 ---
 
+### 2.9 Archived Versions Are Still Versions
+
+*Location: [`lib/index.js`](../lib/index.js)*
+
+Archiving (by this plugin's "collect into the tree", or by DSH's own archive) only takes a
+session **out of the sidebar**. It is not a delete, and the tree is where a conversation's
+versions live, so every version the family walk finds is drawn — archived ones with
+`archived: true`, which the client renders dimmed and marked 已归档, and whose context menu
+offers "move to main chat".
+
+This used to be a filter: an archived version was drawn only if the tree itself had collected
+it (`state.demoted`) or something still descended from it. That rule existed for
+dsh-sidenote, which forks a session for a side chat and archives it to keep the sidebar clean —
+but it also hid the reader's own forks: a fork made at turn 44 and archived by hand was
+invisible in the tree, with no way back. A side chat, if such a plugin returns, now shows up as
+an archived branch instead: visible, dimmed, and reversible.
+
+---
+
 ## 3. Graph Layout & Springs
 
 *Location: [`plugin.client.js`](../plugin.client.js#L567-L612)*
