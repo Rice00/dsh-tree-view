@@ -98,7 +98,11 @@ only in a new temporary home whose name contains `tree-view-dsh-qa-`.
 Set `DSH_HOME` to that home and `DSH_QA_MODULES` to the official runtime's
 `node_modules` directory. Use a separate Web profile with the base/Web bundles,
 a built copy of this plugin, and a loader entry for the fixture. Never point
-this fixture at an existing user's DSH home.
+this fixture at an existing user's DSH home. The fixture resolves
+`@deepseek-ai/dsh-llm` and `sharp` the way the host does — from the runtime root,
+then from the tree as `@deepseek-ai/dsh`, `dsh-base` and `dsh-web-app` see it,
+then by scanning the tree — and names the anchors it tried when it cannot find
+them, so a runtime npm has reshaped still works.
 
 Once the isolated server prints its URL, run:
 

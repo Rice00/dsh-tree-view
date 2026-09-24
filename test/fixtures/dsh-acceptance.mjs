@@ -3,14 +3,14 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { createQaResolver } from './qa-resolve.mjs';
 
 assert.ok(process.env.DSH_QA_MODULES, 'Set DSH_QA_MODULES to the official runtime node_modules');
 assert.match(process.env.DSH_HOME ?? '', /tree-view-dsh-qa-/, 'Use a disposable QA home');
-const require = createRequire(join(process.env.DSH_QA_MODULES, 'package.json'));
-const { LlmAdapter, createUserMessage } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')));
-const { default: sharp } = await import(pathToFileURL(require.resolve('sharp')));
+const resolveQaModule = createQaResolver(process.env.DSH_QA_MODULES);
+const { LlmAdapter, createUserMessage } = await import(pathToFileURL(resolveQaModule('@deepseek-ai/dsh-llm')));
+const { default: sharp } = await import(pathToFileURL(resolveQaModule('sharp')));
 
 class LocalReply extends LlmAdapter {
   async resolveModel(provider, model) {

@@ -55,6 +55,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # dsh-llm and sharp are deliberately NOT named here: as direct dependencies their peers
+      # would have to be reconciled at the runtime root, and @deepseek-ai/dsh-llm pinning
+      # @deepseek-ai/cordis@4.0.2 against cordis-plugin-include's ~4.0.4 is an ERESOLVE. The
+      # fixture resolves them through the tree the host itself uses instead.
       - name: Install published official runtime
         run: npm install --prefix "${{ runner.temp }}/dsh-runtime" --no-audit --no-fund @deepseek-ai/dsh@0.1.5-rc.2
       - name: Verify real edits and restart persistence with an offline model
