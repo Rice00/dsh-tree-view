@@ -736,6 +736,8 @@ function buildTurnTree(versions, currentSessionId, options) {
           onCurrentPath: false,
           deleted: !!v.deleted,
           archived: !!v.archived,
+          subagent: v.subagent === true,
+          delegationDepth: v.delegationDepth,
           // Every node of a named version carries the name so the group frame
           // can wrap the whole branch, not just the node where it starts.
           versionLabel: v.label || undefined,
@@ -754,6 +756,8 @@ function buildTurnTree(versions, currentSessionId, options) {
         onCurrentPath: false,
         deleted: !!v.deleted,
         archived: !!v.archived,
+        subagent: v.subagent === true,
+        delegationDepth: v.delegationDepth,
         versionLabel: v.label || undefined,
       });
     } else if (ownTurns.length === 0) {
@@ -769,6 +773,8 @@ function buildTurnTree(versions, currentSessionId, options) {
         onCurrentPath: false,
         deleted: !!v.deleted,
         archived: !!v.archived,
+        subagent: v.subagent === true,
+        delegationDepth: v.delegationDepth,
         versionLabel: v.label || undefined,
       });
     } else {
@@ -787,6 +793,8 @@ function buildTurnTree(versions, currentSessionId, options) {
           onCurrentPath: false,
           deleted: !!v.deleted,
           archived: !!v.archived,
+          subagent: v.subagent === true,
+          delegationDepth: v.delegationDepth,
           // A version's name belongs to every node it owns, so the group frame
           // wraps the whole branch: the fork point and everything it grows
           // afterwards, but none of its own branches.
@@ -1060,6 +1068,19 @@ function flashTurn(sessionId, turn, tries) {
 /* ------------------------------------------------------------------ css -- */
 
 const CSS = [
+  // Every colour this plugin draws comes from the host's theme, through one set
+  // of local aliases. The names below are the ones DSH actually defines
+  // (`bg-layer-2`, `border-l2`, `state-business-primary`, …); the earlier
+  // `accent-primary` / `bg-primary` / `border-secondary` names are not part of
+  // the host's palette at all, so their hardcoded fallbacks were what the plugin
+  // painted with — dark cards on a light theme. Legacy names stay in the chain
+  // only as a courtesy for hosts that define them.
+  //
+  // Declared on this plugin's own roots, never on `:root`: a var() inside a custom
+  // property is substituted where it is *declared*, so a `:root` alias would freeze
+  // whatever the palette said at the top of the document and the dark theme would
+  // never reach it.
+  '.mtx-row,.mtx-graph,.mtx-set{--mtx-accent:var(--dsw-alias-state-business-primary,var(--dsw-alias-accent-primary,#4176e6));--mtx-accent-soft:color-mix(in srgb,var(--mtx-accent) 55%,transparent);--mtx-surface:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-primary,#ffffff));--mtx-surface-raised:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-layer-2,#ffffff));--mtx-line:var(--dsw-alias-border-l2,var(--dsw-alias-border-secondary,#0000001a));--mtx-line-strong:var(--dsw-alias-border-l3,var(--dsw-alias-border-l2,#0000001f));--mtx-shadow:var(--dsw-alias-bg-mask-2,#0000001f);--mtx-shadow-strong:var(--dsw-alias-bg-mask-3,#0000007a);--mtx-danger:var(--dsw-alias-state-error-primary,var(--dsw-alias-status-error,#ec1313));--mtx-warn:var(--dsw-alias-state-warn-primary,var(--dsw-alias-status-warning,#f59e0b));--mtx-on-accent:var(--dsw-alias-label-primary-foreground,#ffffff)}',
   // User bubble replica: right-aligned rounded panel like the host's, with a
   // hover-revealed edit control to its left, ChatGPT-style.
   '.mtx-row{display:flex;flex-direction:column;align-items:flex-end;gap:6px}',
@@ -1075,12 +1096,12 @@ const CSS = [
   '.mtx-editor{width:min(85%,720px);background:var(--dsw-alias-interactive-bg-hover,rgba(140,140,150,.14));border-radius:16px;padding:12px 16px;display:flex;flex-direction:column;gap:10px}',
   '.mtx-textarea{width:100%;min-height:72px;resize:vertical;border:0;outline:none;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:15px;line-height:26px}',
   '.mtx-editor-actions{display:flex;justify-content:flex-end;gap:8px}',
-  '.mtx-btn{padding:6px 16px;border-radius:999px;border:1px solid var(--dsw-alias-border-secondary,rgba(128,128,128,.3));background:transparent;font:inherit;font-size:13px;color:var(--dsw-alias-label-primary);cursor:pointer}',
+  '.mtx-btn{padding:6px 16px;border-radius:999px;border:1px solid var(--mtx-line);background:transparent;font:inherit;font-size:13px;color:var(--dsw-alias-label-primary);cursor:pointer}',
   '.mtx-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}',
-  '.mtx-btn[data-primary]{background:var(--dsw-alias-accent-primary,#4b8dff);border-color:transparent;color:#fff}',
+  '.mtx-btn[data-primary]{background:var(--mtx-accent);border-color:transparent;color:var(--mtx-on-accent)}',
   '.mtx-btn[data-primary]:hover{filter:brightness(1.08)}',
   '.mtx-btn[disabled]{opacity:.5;cursor:default}',
-  '.mtx-error{font-size:12px;color:var(--dsw-alias-status-error,#e5484d)}',
+  '.mtx-error{font-size:12px;color:var(--mtx-danger)}',
 
   // Version ring, under the bubble: ‹ 2/3 ›.
   '.mtx-ring{display:flex;align-items:center;gap:2px;font-size:12px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
@@ -1095,17 +1116,17 @@ const CSS = [
   '.mtx-world{position:absolute;left:0;top:0;will-change:transform}',
   '.mtx-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}',
   '.mtx-edge{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 45%,transparent);stroke-width:1.5}',
-  '.mtx-edge[data-path]{stroke:var(--dsw-alias-accent-primary,#4b8dff);stroke-width:2}',
-  '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));box-shadow:0 2px 10px rgba(0,0,0,.14);cursor:pointer;will-change:transform;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
-  '.mtx-card:hover{box-shadow:0 6px 22px rgba(0,0,0,.24);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent)}',
+  '.mtx-edge[data-path]{stroke:var(--mtx-accent);stroke-width:2}',
+  '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--mtx-surface));box-shadow:0 2px 10px var(--mtx-shadow);cursor:pointer;will-change:transform;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
+  '.mtx-card:hover{box-shadow:0 6px 22px var(--mtx-shadow-strong);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent)}',
   // A card is highlighted when it is on the line you are reading: the turns you
   // are adding and the shared history above the fork are the same line, so both
   // carry `data-current`. What is not on that line — the other branch's turns —
   // stays plain, which is what makes "where am I" readable. The node that is
   // literally the open session gets one extra ring so the exact spot is findable.
-  '.mtx-card[data-current]{border-color:var(--dsw-alias-accent-primary,#4b8dff);box-shadow:0 0 0 1px color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 55%,transparent),0 6px 22px color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 22%,transparent)}',
-  '.mtx-card[data-head]{box-shadow:0 0 0 2px var(--dsw-alias-accent-primary,#4b8dff),0 8px 26px color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 34%,transparent)}',
-  '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px rgba(0,0,0,.3);z-index:3}',
+  '.mtx-card[data-current]{border-color:var(--mtx-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--mtx-accent) 55%,transparent),0 6px 22px color-mix(in srgb,var(--mtx-accent) 22%,transparent)}',
+  '.mtx-card[data-head]{box-shadow:0 0 0 2px var(--mtx-accent),0 8px 26px color-mix(in srgb,var(--mtx-accent) 34%,transparent)}',
+  '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px var(--mtx-shadow-strong);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
   // A folded stretch is not a turn: it is a stack of them. Three sheets offset
@@ -1114,48 +1135,52 @@ const CSS = [
   // canvas is zoomed out. Taller than a bar on purpose, so it holds its own next
   // to a turn card. Everything takes its colour from `currentColor`, so an accent
   // fold on the line you are reading stays accent and the rest stay neutral.
-  '.mtx-card[data-fold]{width:176px;padding:15px 14px;border-radius:11px;border:1px solid color-mix(in srgb,currentColor 48%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 15%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));color:var(--dsw-alias-label-secondary,#bbb);box-shadow:7px 7px 0 -1px var(--dsw-alias-bg-primary,#1e1e22),7px 7px 0 0 color-mix(in srgb,currentColor 55%,transparent),14px 14px 0 -2px var(--dsw-alias-bg-primary,#1e1e22),14px 14px 0 -1px color-mix(in srgb,currentColor 32%,transparent);align-items:center;gap:8px}',
-  '.mtx-card[data-fold][data-current]{color:var(--dsw-alias-accent-primary,#4b8dff)}',
+  '.mtx-card[data-fold]{width:176px;padding:15px 14px;border-radius:11px;border:1px solid color-mix(in srgb,currentColor 48%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 15%,var(--mtx-surface));color:var(--dsw-alias-label-secondary,#bbb);box-shadow:7px 7px 0 -1px var(--mtx-surface),7px 7px 0 0 color-mix(in srgb,currentColor 55%,transparent),14px 14px 0 -2px var(--mtx-surface),14px 14px 0 -1px color-mix(in srgb,currentColor 32%,transparent);align-items:center;gap:8px}',
+  '.mtx-card[data-fold][data-current]{color:var(--mtx-accent)}',
   '.mtx-card[data-fold] .mtx-card-icon{width:auto;height:auto;background:transparent;color:inherit;font-size:13px;letter-spacing:.08em}',
   '.mtx-card[data-fold] .mtx-card-title{font-size:12.5px;line-height:18px;color:inherit;font-weight:600}',
   '.mtx-fold-cue{margin-left:auto;flex:none;font-size:12px;line-height:1;color:inherit;opacity:.7}',
-  '.mtx-card[data-labeled] .mtx-card-title{color:var(--dsw-alias-accent-primary,#4b8dff)}',
-  '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 7%,transparent);z-index:0;pointer-events:none}',
-  '.mtx-group-name{position:absolute;left:14px;top:-10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--dsw-alias-accent-primary,#4b8dff);background:var(--dsw-alias-bg-primary,#1e1e22);border:1px solid color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 45%,transparent)}',
-  '.mtx-menu{position:absolute;left:0;top:0;z-index:9;display:flex;flex-direction:column;min-width:148px;padding:4px;border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--dsw-alias-bg-primary,#1e1e22);box-shadow:0 10px 30px rgba(0,0,0,.34)}',
+  '.mtx-card[data-labeled] .mtx-card-title{color:var(--mtx-accent)}',
+  // A subagent conversation is not a version of your message, so the card says so
+  // where it can always be seen: a small accent tag on the card's top edge. It
+  // floats, so a long title or subtitle never pushes it out of the way.
+  '.mtx-card-tag{position:absolute;top:-8px;right:8px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:600;line-height:15px;color:var(--mtx-on-accent);background:var(--mtx-accent);box-shadow:0 1px 4px var(--mtx-shadow);white-space:nowrap}',
+  '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--mtx-accent) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--mtx-accent) 7%,transparent);z-index:0;pointer-events:none}',
+  '.mtx-group-name{position:absolute;left:14px;top:-10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--mtx-accent);background:var(--mtx-surface);border:1px solid color-mix(in srgb,var(--mtx-accent) 45%,transparent)}',
+  '.mtx-menu{position:absolute;left:0;top:0;z-index:9;display:flex;flex-direction:column;min-width:148px;padding:4px;border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 10px 30px var(--mtx-shadow-strong)}',
   '.mtx-menu-item{appearance:none;border:0;background:transparent;text-align:left;font-family:inherit;font-size:12.5px;line-height:18px;padding:7px 10px;border-radius:8px;color:var(--dsw-alias-label-primary,#eee);cursor:pointer;white-space:nowrap}',
-  '.mtx-menu-item:hover:not([disabled]){background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08))}',
+  '.mtx-menu-item:hover:not([disabled]){background:var(--dsw-alias-interactive-bg-hover,var(--mtx-line))}',
   '.mtx-menu-item[disabled]{color:var(--dsw-alias-label-tertiary,#888);cursor:not-allowed}',
   '.mtx-rename{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;z-index:7}',
-  '.mtx-rename-input{width:100%;box-sizing:border-box;font-family:inherit;font-size:12.5px;line-height:17px;padding:9px 11px;border-radius:13px;border:1px solid var(--dsw-alias-accent-primary,#4b8dff);background:var(--dsw-alias-bg-primary,#1e1e22);color:var(--dsw-alias-label-primary,#eee);outline:none;box-shadow:0 6px 22px rgba(0,0,0,.28)}',
+  '.mtx-rename-input{width:100%;box-sizing:border-box;font-family:inherit;font-size:12.5px;line-height:17px;padding:9px 11px;border-radius:13px;border:1px solid var(--mtx-accent);background:var(--mtx-surface);color:var(--dsw-alias-label-primary,#eee);outline:none;box-shadow:0 6px 22px var(--mtx-shadow-strong)}',
   '.mtx-rename-input::placeholder{color:var(--dsw-alias-label-tertiary,#888)}',
-  '.mtx-card[data-deleted]:hover{box-shadow:0 2px 10px rgba(0,0,0,.14);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent)}',
+  '.mtx-card[data-deleted]:hover{box-shadow:0 2px 10px var(--mtx-shadow);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent)}',
   '.mtx-card-icon{flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:12px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 18%,transparent);color:var(--dsw-alias-label-secondary,#bbb)}',
-  '.mtx-card[data-path] .mtx-card-icon{background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 20%,transparent);color:var(--dsw-alias-accent-primary,#4b8dff)}',
+  '.mtx-card[data-path] .mtx-card-icon{background:color-mix(in srgb,var(--mtx-accent) 20%,transparent);color:var(--mtx-accent)}',
   '.mtx-card-main{min-width:0;flex:1}',
   '.mtx-card-title{font-size:12.5px;font-weight:600;line-height:17px;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
   '.mtx-card-sub{font-size:11px;line-height:15px;margin-top:2px;color:var(--dsw-alias-label-tertiary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
   '.mtx-graph-tools{position:absolute;top:12px;right:14px;display:flex;gap:6px;z-index:4}',
-  '.mtx-tool{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:var(--dsw-alias-bg-primary,rgba(30,30,34,.85));color:var(--dsw-alias-label-secondary,#bbb);cursor:pointer;font-size:14px}',
+  '.mtx-tool{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:var(--mtx-surface);color:var(--dsw-alias-label-secondary,#bbb);cursor:pointer;font-size:14px}',
   '.mtx-tool:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
-  '.mtx-tool[data-on]{color:var(--dsw-alias-accent-primary,#4b8dff);border-color:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 55%,transparent);background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 14%,transparent)}',
-  '.mtx-confirm{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);z-index:10;width:min(460px,calc(100% - 40px));box-sizing:border-box;padding:22px 24px;border-radius:15px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--dsw-alias-bg-primary,#1e1e22);box-shadow:0 18px 50px rgba(0,0,0,.46)}',
+  '.mtx-tool[data-on]{color:var(--mtx-accent);border-color:color-mix(in srgb,var(--mtx-accent) 55%,transparent);background:color-mix(in srgb,var(--mtx-accent) 14%,transparent)}',
+  '.mtx-confirm{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);z-index:10;width:min(460px,calc(100% - 40px));box-sizing:border-box;padding:22px 24px;border-radius:15px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 18px 50px var(--mtx-shadow-strong)}',
   '.mtx-confirm-title{font-size:15px;line-height:23px;color:var(--dsw-alias-label-primary,#eee)}',
   '.mtx-confirm-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}',
   '.mtx-confirm .mtx-btn{font-size:13.5px;padding:9px 20px;border-radius:10px}',
-  '.mtx-confirm .mtx-btn-primary{background:var(--dsw-alias-accent-primary,#4b8dff);border-color:transparent;color:#fff}',
+  '.mtx-confirm .mtx-btn-primary{background:var(--mtx-accent);border-color:transparent;color:var(--mtx-on-accent)}',
   '.mtx-btn{appearance:none;font-family:inherit;font-size:12px;padding:6px 12px;border-radius:9px;cursor:pointer;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:transparent;color:var(--dsw-alias-label-primary,#eee)}',
-  '.mtx-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08))}',
-  '.mtx-btn-primary{border-color:var(--dsw-alias-accent-primary,#4b8dff);color:var(--dsw-alias-accent-primary,#4b8dff)}',
+  '.mtx-btn:hover{background:var(--dsw-alias-interactive-bg-hover,var(--mtx-line))}',
+  '.mtx-btn-primary{border-color:var(--mtx-accent);color:var(--mtx-accent)}',
   '.mtx-empty{position:absolute;left:0;right:0;bottom:26px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;pointer-events:none}',
   '.mtx-graph .mtx-link{position:absolute;right:14px;bottom:10px;font-size:12px;color:var(--dsw-alias-label-tertiary);text-decoration:none;z-index:4}',
   '.mtx-link:hover{color:var(--dsw-alias-label-primary)}',
-  '.mtx-error{font-size:12px;color:var(--dsw-alias-status-error,#e5484d)}',
+  '.mtx-error{font-size:12px;color:var(--mtx-danger)}',
   '.mtx-graph .mtx-error{position:absolute;left:14px;top:16px;z-index:4}',
-  '.mtx-notice{position:absolute;left:14px;right:14px;bottom:34px;z-index:4;pointer-events:none;padding:7px 10px;border-radius:9px;font-size:11.5px;line-height:16px;color:var(--dsw-alias-label-secondary,#bbb);background:color-mix(in srgb,var(--dsw-alias-status-warning,#e0a03a) 14%,var(--dsw-alias-bg-primary,rgba(30,30,34,.9)));border:1px solid color-mix(in srgb,var(--dsw-alias-status-warning,#e0a03a) 40%,transparent)}',
+  '.mtx-notice{position:absolute;left:14px;right:14px;bottom:34px;z-index:4;pointer-events:none;padding:7px 10px;border-radius:9px;font-size:11.5px;line-height:16px;color:var(--dsw-alias-label-secondary,#bbb);background:color-mix(in srgb,var(--mtx-warn) 14%,var(--mtx-surface));border:1px solid color-mix(in srgb,var(--mtx-warn) 40%,transparent)}',
 
   // Flash highlight when a graph click lands on its message.
-  '@keyframes mtx-flash-kf{0%,55%{background:color-mix(in srgb,var(--dsw-alias-accent-primary,#4b8dff) 22%,transparent)}100%{background:transparent}}',
+  '@keyframes mtx-flash-kf{0%,55%{background:color-mix(in srgb,var(--mtx-accent) 22%,transparent)}100%{background:transparent}}',
   '.mtx-flash .mtx-bubble{animation:mtx-flash-kf 1.4s ease-out}',
 
   /* ---- action row, below the bubble ------------------------------------ */
@@ -1188,7 +1213,7 @@ const CSS = [
   '.mtx-set-intro{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#888);padding-bottom:2px}',
   '.mtx-set-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
   '.mtx-set-label{font-size:13px;font-weight:600}',
-  '.mtx-select{border-radius:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--dsw-alias-bg-primary,rgba(30,30,34,.6));color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;padding:6px 10px;outline:none;cursor:pointer}',
+  '.mtx-select{border-radius:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;padding:6px 10px;outline:none;cursor:pointer}',
   '.mtx-set-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}',
   '.mtx-preview{margin-top:2px;padding:18px 16px 16px;border-radius:12px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 7%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 16%,transparent);pointer-events:none}',
   '.mtx-preview .mtx-editor{margin-top:12px}',
@@ -1268,6 +1293,7 @@ return {
         styleDesc_claude: 'Retry, edit and copy under the bubble, revealed on hover. Cancel and Save sit below the editor.',
         deletedVersion: 'Deleted version',
         archivedTag: 'Archived',
+        subagentTag: 'subagent',
         rememberPathLabel: 'Open the version I was last reading',
         rememberPathHint: 'Off by default: the conversation you click is the conversation you get. On, coming back to a family from another conversation opens the version you had open in it — never on a page load, never when you moved inside the family yourself, and never for a version the sidebar is not listing.',
         stopOnEditLabel: 'Stop the reply that is still being written',
@@ -1337,6 +1363,7 @@ return {
         styleDesc_claude: '气泡下方为重试、编辑与复制，悬停时显示；「取消 / 保存」位于编辑框下方。',
         deletedVersion: '已删除的版本',
         archivedTag: '已归档',
+        subagentTag: '子代理',
         rememberPathLabel: '打开我上次在读的那条版本',
         rememberPathHint: '默认关闭：点哪个会话就打开哪个会话。开启后，从别的会话回到这个家族时，会打开你上次读的那条版本 —— 页面刚加载、你在家族内自己走动、或那条版本已不在侧栏时，都不会跳。',
         stopOnEditLabel: '先停掉还在生成的回复',
@@ -2327,6 +2354,7 @@ return {
             // around the branch, and the node keeps saying what it is ("edited
             // turn 3"), so neither piece of information displaces the other.
             const sub = (n.running ? t('runningTag') + ' · ' : '')
+              + (n.subagent ? t('subagentTag') + ' · ' : '')
               + (n.copy ? t('forkedAt', { turn: n.turn }) + ' · ' : '')
               + (n.archived ? t('archivedTag') + ' · ' : '')
               + (n.text ? '“' + clip(n.text, 44) + '” · ' : '')
@@ -2347,6 +2375,11 @@ return {
               'data-archived': n.archived || undefined,
               'data-running': n.running || undefined,
               'data-fold': n.fold || undefined,
+              // A subagent conversation shares this family (same cwd, parent
+              // session) but is not a version of the reader's message. The card
+              // says so in the open, and says it in the subtitle too, so a chain
+              // of its turns is recognisable at a glance.
+              'data-subagent': n.subagent || undefined,
               title: n.deleted ? undefined : (n.fold ? t('foldExpandHint') : t('menuHint')),
               onContextMenu: function (ev) {
                 ev.preventDefault();
@@ -2365,7 +2398,10 @@ return {
                 // shape. Every other node keeps its subtitle.
                 n.fold ? null : React.createElement('span', { className: 'mtx-card-sub' }, sub)
               ),
-              n.fold ? React.createElement('span', { className: 'mtx-fold-cue' }, '⌄') : null
+              n.fold ? React.createElement('span', { className: 'mtx-fold-cue' }, '⌄') : null,
+              // The tag rides on the card's top edge: this conversation belongs to
+              // a subagent, not to a version of the reader's message.
+              n.subagent ? React.createElement('span', { className: 'mtx-card-tag' }, t('subagentTag')) : null
             );
           }),
           // The rename editor renders inside the world so it inherits the same

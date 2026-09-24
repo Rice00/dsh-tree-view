@@ -137,6 +137,28 @@ anything behind the reader's back. Two protections remain on the version being c
 archived one has nothing to collect, and one that is still generating a reply is skipped,
 because archiving mid-turn would hide work that is still arriving.
 
+### 2.8 Subagent Sessions in a Family (`subagent`)
+
+*Location: [`lib/index.js`](../lib/index.js)*
+
+A subagent session is a **child session** of the conversation that spawned it: `origin:
+'subagent'` in its header, `parentSession` pointing at the conversation, `delegationDepth` one
+per level, and — the part that matters here — **the same `cwd`**. The family walk keys on
+exactly those two things (same cwd, reachable through `parentSession`), so a subagent
+conversation is swept into the family and drawn as if it were a version of the reader's
+message. It has no `message-tree/version` marker, which is the only hint the client had.
+
+Measured on this machine: 29 subagent sessions across 7 workspaces, one conversation with
+four of them. So the host says what it knows and the client marks it:
+
+- the payload carries `subagent: true` (from `header.origin`), plus `delegationDepth` when it
+  is nested deeper than one level;
+- every node of that version inherits the flag, so a card carries `data-subagent` and a
+  `subagent` tag on its top edge — the same tag the subtitle repeats in words.
+
+Nothing about placement changes: the version is still drawn where the walk put it. Hiding or
+collapsing subagent conversations is a separate decision, not taken here.
+
 ---
 
 ## 3. Graph Layout & Springs

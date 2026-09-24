@@ -386,6 +386,26 @@ test('a run below the threshold is never folded, not even by hand', async (t) =>
   assert.equal(view.foldCard(), null, 'pressing it folds nothing either');
 });
 
+test('a subagent conversation is marked as one', async (t) => {
+  // It shares the family (same cwd, parent session) but is not a version of the
+  // reader's message, so its cards have to say what they are.
+  const withDelegate = VERSIONS.concat([{
+    sessionId: 'session-delegate',
+    parentSessionId: 'session-root',
+    createdAt: 5,
+    subagent: true,
+    turns: [{ turn: 1, text: 'delegate one', time: 5 }],
+  }]);
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, withDelegate, undefined, 'session-root');
+
+  const card = view.dom.window.document.querySelector('.mtx-card[data-id="session-delegate#t1"]');
+  assert.ok(card, 'the subagent conversation is drawn');
+  assert.equal(card.hasAttribute('data-subagent'), true, 'and carries the flag in the open');
+  assert.ok(card.textContent.includes('subagent'), 'the card says so: ' + card.textContent);
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-card[data-subagent]').length, 1,
+    'only the subagent conversation is marked');
+});
+
 test('a long run on one branch folds too, not only the shared history', async (t) => {
   // 30 turns on the conversation with one small fork at turn 5: the shared
   // history is turns 1..4, and turns 6..29 are the unbranched run that only this

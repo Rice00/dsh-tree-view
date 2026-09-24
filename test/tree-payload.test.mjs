@@ -32,6 +32,10 @@ function harness(options) {
       cwd: '/qa',
       isSeeded: spec.parent !== undefined,
       ...spec.parent === undefined ? {} : { parentSession: spec.parent },
+      // A subagent session is a child session like a fork, and only `origin`
+      // tells the two apart.
+      ...spec.origin === undefined ? {} : { origin: spec.origin },
+      ...spec.delegationDepth === undefined ? {} : { delegationDepth: spec.delegationDepth },
     };
     // A seeded session's log is [inherited prefix][its own turns]. `forkTurns`
     // is how much history it copied, `ownTurns` what it did afterwards — the
@@ -124,6 +128,26 @@ function harness(options) {
   get.running = running;
   return get;
 }
+
+test('a subagent conversation in the family is flagged as one', async () => {
+  // Measured on this machine's real sessions: a subagent session carries
+  // `origin: 'subagent'` with `parentSession` pointing at the conversation and the
+  // same cwd — which is exactly the family walk's key, so the tree drew it as if
+  // it were a branch of the user's own message. The payload has to say what it is.
+  const get = harness({
+    sessions: [
+      { id: 'session-root' },
+      { id: 'session-delegate', parent: 'session-root', createdAt: 10, origin: 'subagent', delegationDepth: 1 },
+      { id: 'session-sub-delegate', parent: 'session-delegate', createdAt: 11, origin: 'subagent', delegationDepth: 2 },
+    ],
+  });
+  const response = await get('session-root');
+  const byId = new Map(response.body.versions.map((v) => [v.sessionId, v]));
+  assert.equal(byId.get('session-delegate').subagent, true, 'the subagent session is flagged');
+  assert.equal(byId.get('session-sub-delegate').subagent, true, 'and so is its own child');
+  assert.equal(byId.get('session-sub-delegate').delegationDepth, 2, 'with the depth when it is nested');
+  assert.equal(byId.get('session-root').subagent, undefined, 'the conversation itself is not');
+});
 
 test('a side-chat fork archived away from the sidebar is not drawn as a branch', async () => {
   const get = harness({

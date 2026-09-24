@@ -51,6 +51,14 @@ The threshold is **counted per stretch**, so a short one is never folded just be
 
 Any version can be "collected into the Tree" or "put back into the main chat". Both simply flip its archived state: no session is created, copied, or deleted.
 
+### Subagent conversations are marked
+
+A subagent hangs its session under your conversation, in the same working directory — close enough for the family tree to draw it as if it were a branch of your message (one real conversation had four of them). It is not a version of what you wrote, so its cards carry a small "subagent" tag on the top edge.
+
+### It follows your DSH theme
+
+Every colour comes from the host's own theme variables — surfaces, borders, accent, state colours, even the shadows. Light follows light, dark follows dark, and no dark literal is left in the plugin. A test guards the rule that broke this before: a token name the host does not define is a bug, and that is why the cards used to stay dark on a light theme.
+
 ## Install
 
 ```bash
