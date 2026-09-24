@@ -1,163 +1,184 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="dsh-tree-view" width="150" />
+<img src="assets/logo.png" alt="dsh-tree-view" width="140" />
 
 # dsh-tree-view
 
-**一个对话 = 一棵树 = 侧栏一个入口**
+**TreeView —— 以树形视图使用会话**
 
-在 DeepSeek Harness 里以树形视图使用会话：编辑一条旧消息，对话从那一刻重新分叉，而**所有分支住进同一棵树** —— 侧栏里永远只占一个位置。
+编辑一条旧消息，对话从那一刻分叉；分叉出来的版本都住进同一棵树，侧栏里始终只有一条。
+
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f7de1.svg)](./LICENSE)
-[![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#兼容性)
-[![DSH: 0.1.5-rc.2](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff.svg)](#兼容性)
-[![PRs: welcome](https://img.shields.io/badge/PRs-welcome-7096d1.svg)](#贡献)
+[![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#安装)
+[![DSH: 0.1.5-rc.2](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff.svg)](#常见问题)
+[![PRs: welcome](https://img.shields.io/badge/PRs-welcome-7096d1.svg)](#参与贡献)
 [![GitHub stars](https://img.shields.io/github/stars/Rice00/dsh-tree-view?style=flat&label=stars&color=7096d1)](https://github.com/Rice00/dsh-tree-view/stargazers)
-
-[特色](#特色) · [安装](#安装) · [上手](#上手) · [设置](#设置) · [原理](#它是怎么做到的) · [**English**](./README.en.md)
 
 </div>
 
 ---
 
-## 特色
+**编辑一条已经发出的消息**，或用 DSH 自带的**「在新对话中分支」**按钮，都会在这里长出一条新分支：
 
-| | |
+![用户消息下方的版本环，以及编辑 / 复制 / 重试按钮](assets/screenshot-ring.png)
+
+在会话面板切到 Tree，整个家族画在一张图上：
+
+![Tree 标签页：共用的开头是一条主干，第 11 轮处分叉，中间一段连续 8 轮折成一叠薄片，右上角是带「子代理」标识的子代理会话](assets/screenshot-tree.png)
+
+## 功能
+
+| 功能 | 说明 |
 |---|---|
-| 🌳 **一棵树装下整个家族** | **Tree** 标签页把版本画成轮次级分支图：共用的开头合成主干，分叉处张开成枝。 |
-| 🎯 **在读的线整体高亮** | 我从哪来、现在在哪、还能去哪 —— 一张图读完。 |
-| 📌 **侧栏永远只有一个入口** | 哪个版本占着侧栏那个位置，跟着你读哪条线走；位置不会越用越多，反悔随时可以。 |
-| ✋ **绝不悄悄收走你的会话** | 编辑、重试、从侧栏打开会话、恢复上次阅读位置都不改归档状态 —— 只有你从树里挑版本时才换位。 |
-| 🗂️ **长段自动折叠** | 没有任何选择点的连续轮次折成一叠薄片，颜色跟着状态走；阈值按每一段各算，短段不会被旁边的长段连累。 |
-| 👁️ **该看的永远看得见** | 对话起点、分叉点、线的末尾，以及你正在生成的那一轮，从不折进去。 |
-| 🤖 **子代理会话有标识** | 子代理把自己的会话挂在你这个对话下面，树本来会把它当成一个版本画出来；这类卡片带「子代理」标签，一眼分辨。 |
-| ♻️ **收起与放回，随时可逆** | 只翻转归档状态：不新建、不复制、不删除任何会话。 |
-| ⚙️ **开关集中在一处** | 设置 → **TreeView**，五项，面板里逐项说明并实时预览。 |
-| 🔒 **纯视图，不动数据** | 画树、换位、折叠全部是客户端行为，会话日志一个字节都不改。 |
-| 🧩 **可与上游并存** | 行 id `tree-view`、路由 `/tree-view`；持久事件类型保留上游的 `message-tree/version`，已经分过叉的会话直接读出树。 |
-| 🎨 **跟随 DSH 主题** | 背景、边框、强调色、状态色连阴影都取自宿主真正定义的主题变量：浅色跟随浅色、深色跟随深色，插件里不留写死的深色值。 |
+| **点击节点跳转** | 树上每个节点都是一个真实的会话版本，点它你就切到那条线继续聊。背后只是翻转归档状态：被点的解除归档、回到侧栏，你原本在读的那条归档、收进树 —— 所以从树里点来点去，侧栏位置只换不增。 |
+| **多线并行** | 版本本身就是会话。右键「放到主对话」可以把多个版本都放出来（这一步只解除归档、不动别人），让两条分支同时工作、互不干扰；不需要同时看了，再收进树。 |
+| **一键收起** | 面板工具栏的「收起其它分支」一次把该家族散落在侧栏的其它版本全收进树，只留你正在用的那条；若其中有版本还在生成回复，会先问你是停掉再收还是取消，不会悄悄掐掉工作。 |
+| **长段折叠** | 一连串没有分叉的长轮次 —— 包括所有版本共用的开头 —— 达到设定长度就折成一个节点，点开即看；阈值在设置里选，工具栏上随时折回。 |
+| **隐藏空副本** | 只复制了本对话、自己没聊出新内容的 Fork 不画出来，工具栏上有同一个开关。 |
+| **分支重命名** | 右键节点给分支起个名字。侧栏标题仍是宿主自己的（`(1)`、`(2)` 那套照旧），被命名的只有树上的盒子。 |
+| **版本环切换** | 气泡下方的 `‹ n/m ›` 环，不离开对话就能在同一个问题的几个版本之间来回。 |
+| **在读路径高亮** | 你正在读的整条线 —— 含各版本共用的开头 —— 在树上一路高亮，一眼看出从哪来、现在在哪、还能去哪。 |
+| **接着上次阅读** | 从别的会话回到这个家族时，接着你上次读的那条版本（默认关，可在设置里打开）。 |
+| **子代理标识** | 挂在你这个对话下面的子代理会话带标签，不会被误认成你的一个版本。 |
+| **跟随主题** | 背景、边框、强调色、状态色连阴影都取自宿主主题变量，浅色跟随浅色、深色跟随深色。 |
+
+## 实现原理
+
+| 要点 | 说明 |
+|---|---|
+| **回退而非续写** | 编辑时，宿主拿「那一轮之前的全部事件」做种子新建一个会话，再把改后的提问送进去 —— 新版本从你改的那一句重新开始，工作目录与上下文都照旧，不是新开一个空会话。DSH 自带的「在新对话中分支」产生的也是这种以历史为种子的会话，插件照样按种子长度算出分叉点。 |
+| **旧版本不消失** | 原来那条线仍在树里，点一下就回到它；两条线都能继续往下聊，互不干扰。 |
+| **不替你归档** | 编辑、重试、从侧栏打开会话、恢复上次阅读位置，都不改任何归档状态 —— 只有你从树里挑版本、或按下「收起其它分支」时才会。否则你随手改一次措辞，原会话就被悄悄收走了。 |
+
+## 图例
+
+| 图上的东西 | 意思 |
+|---|---|
+| 一根主干 | 所有版本共用的开头，也就是还没分叉的那几轮 |
+| 一处开叉 | 一次编辑：一侧是原版，另一侧是改过的版本 |
+| 高亮的线 | 你正在读的这条，从对话起点连着你现在看的那一轮 |
+| 一叠薄片 | 被折起来的连续轮次 |
+
+可平移、滚轮缩放、点节点跳过去；右键节点可重命名，也可决定它住在侧栏还是住在树里。
+
+## 归档与恢复
+
+插件唯一碰你数据的地方是「归档」这一个开关，单独说清楚：
+
+- **收进树** = 让该版本在 DSH 侧栏里归档；**放回主对话** = 取消归档。这个 DSH 版本没有取消归档的 API，插件只能按归档登记表自己的写法规矩去写它 —— 这块集中在 `lib/archive-adapter.js`，启动时先探测宿主支持到什么程度，缺了就写日志、置灰按钮，树的其余功能照常。
+- **不删、不复制、不改写会话内容。** 会话日志是仅追加的；除了分叉时必须写的那一条 `message-tree/version` 标记，插件不往里加任何东西。
+- **卸载之后**所有会话都还在，被收进树的那几条可以在 DSH 的归档列表里取消归档。分支名与「谁被收进树」记在 `~/.dsh/storages/tree-view/state.json`，留着不碍事，删掉也不影响会话。
 
 ## 安装
+
+从 GitHub 装（npm 上还没有发布）：
 
 ```bash
 dsh plugin --profile web add github:Rice00/dsh-tree-view
 ```
 
-装完**重启该 profile**（宿主插件模块在进程内缓存，不重启不会加载新行；只改界面的话刷新页面即可）。
+补丁会往 profile 里插一行（`tree-view`）。**然后重启这个 profile** —— 宿主插件模块在进程内缓存，运行中的 harness 读不到新行；只改界面的话刷新浏览器就够了。
 
-想改完即用，就指向本地仓库 —— `link:` 是活链接，源码改完立刻生效：
+本地检出（改完即用；`link:` 是活链接，装完不能挪动这个目录）：
 
 ```bash
-dsh plugin --profile web add link:<仓库绝对路径>
+git clone https://github.com/Rice00/dsh-tree-view.git
+dsh plugin --profile web add link:/abs/path/to/dsh-tree-view
 ```
 
 <details>
-<summary><b>让 AI 助手帮你装（整段复制）</b></summary>
+<summary>让 AI 助手帮你装（整段复制）</summary>
 
 ```
 请帮我安装 DSH 插件 dsh-tree-view：
-
-1) 装进 web profile：
-     dsh plugin --profile web add github:Rice00/dsh-tree-view
-   或从本地仓库装（填绝对路径）：
-     dsh plugin --profile web add link:<绝对路径>
-2) 重启该 profile。宿主插件模块在进程内缓存，不重启不会加载新行；只改界面的话刷新页面即可。
-3) 验证：设置里出现 TreeView 分类；会话面板出现 Tree 标签页。
-   启动日志里应有一行 tree-view。
+1) 装进 web profile：dsh plugin --profile web add github:Rice00/dsh-tree-view
+   （本地检出则用：dsh plugin --profile web add link:<绝对路径>）
+2) 重启该 profile；只改界面的话刷新浏览器即可。
+3) 验证：会话面板出现 Tree 标签页，设置里出现 TreeView 分类。
 ```
 
 </details>
 
-## 上手
+## 与上游的关系
 
-1. **编辑一条已经发出的消息** —— 对话从那一轮重新分叉，与 ChatGPT、Claude 一致，不是从末尾续写。
-2. **看全貌** —— 会话面板的 **Tree** 标签页：可平移、滚轮缩放、点节点跳过去。
-3. **收进树 / 放回侧栏** —— 右键任意节点；两个动作都只翻转归档状态。
+本仓库是 [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit) 的 fork，宿主端的分支引擎来自它（其分支逻辑又源自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)）。区别在重心：上游是「编辑消息」插件，本 fork 把「编辑出来的那些版本住在哪里」当成主要问题 —— 于是有了树、换位和折叠。
+
+两个插件可以并存：行 id（`tree-view`）与 HTTP 路由（`/tree-view`）都是独立的；但**持久事件类型仍沿用上游的 `message-tree/version`**，所以上游已经分过叉的会话在这里照样读出树，不需要迁移数据。只装它、不装上游也可以，它不是依赖。
+
+## 常见问题
+
+**会不会把我的会话弄乱？**
+不会。编辑只产生新版本，不改写原会话；而且没人替你归档，位置只在你自己挑版本或按「收起其它分支」时才变。
+
+**被收进树的版本去哪找？**
+在 Tree 标签页里；右键「放到主对话」就回到侧栏，也可以在 DSH 的归档列表里取消归档。
+
+**能同时开好几条分支聊吗？**
+能。每个版本都是独立会话，把它们逐个「放到主对话」即可并行；不想一起看的时候再收进树。
+
+**长家族会不会看不清？**
+折叠就是为这个做的：设置里可改成永不折，也可以随时手工折回。
+
+**DSH 自带的分支按钮产生的会话也会进树吗？**
+会。它同样是一个以历史为种子的会话，插件按种子长度算出分叉点，画成这条线上的一个版本。DSH 自己限制这个按钮只能用在**已完成轮次的最后一条消息**上，插件不改这个限制。
+
+**支持哪个版本的 DSH？**
+已验证 `0.1.5-rc.2`；`engines.dsh` 声明 `>=0.1.5-rc.2 <0.1.6-0`。更新插件后请重启 DSH。
 
 ## 设置
 
-全部在 **设置 → TreeView**：
+设置 → **TreeView**，五项，面板里逐项说明：
 
-| 设置 | 默认 | 作用 |
-| --- | --- | --- |
-| 消息操作样式 | DeepSeek | ChatGPT / DeepSeek / Claude 三种按钮布局，面板内实时预览 |
-| 打开我上次在读的那条版本 | 关 | 从别的会话回到这个家族时，回到上次读的那条 |
-| 先停掉还在生成的回复 | 开 | 编辑 / 重试前先停掉同一家族里还在跑的回复，省额度 |
-| 不画没有新内容的副本 | 开 | 只复制了本对话、自己没聊出新内容的 Fork 不画出来 |
-| 折叠过长的连续轮次 | 8 轮及以上 | 永不 / 5 / 8 / 12 / 20 |
+| 设置 | 默认 | 说明 |
+|---|---|---|
+| 消息操作样式 | `DeepSeek` | `ChatGPT` / `DeepSeek` / `Claude` 三种按钮布局，面板内实时预览。 |
+| 打开我上次在读的那条版本 | `off` | 见「接着上次阅读」。 |
+| 先停掉还在生成的回复 | `on` | 编辑 / 重试前先停掉同一家族里还在跑的回复（含其它版本），省额度，也允许在回复途中编辑。 |
+| 不画没有新内容的副本 | `on` | 见「隐藏空副本」，工具栏上有同一个开关。 |
+| 折叠过长的连续轮次 | `8 轮及以上` | `永不` / `5` / `8` / `12` / `20`，按每一段各算，见「长段折叠」。 |
 
-## 它是怎么做到的
-
-DSH 的会话是仅追加的事件日志，本身没有「会话内分支」，所以回溯得自己实现：
-
-1. **新建会话做种子** —— 编辑时，宿主以「目标轮次之前的全部事件」为种子创建一个新会话，写入一条持久的 `message-tree/version` 标记说明改了什么，再把改后的提问送进去。这才是真正的回溯。
-2. **读回标记还原树** —— 客户端读到这些标记，就能画出整棵树、版本计数，以及你当前站在哪条线上。
-3. **`ignorable` 不能少** —— 插件自定义的事件类型不在宿主的事件词表里，缺了这个信封标志，读取端会拒绝解释整份日志，会话直接打不开。
-
-宿主端的分支引擎来自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)（MIT © Moeblack），本 fork 在其上重做为 ChatGPT 式回溯语义。
-
----
+## 给要改代码的人
 
 <details>
-<summary><b>不会静默坏</b></summary>
+<summary>路由、事件与文件结构</summary>
 
-归档 / 取消归档走 `ctx.workspaceRegistry`：归档用它支持的 `archiveSession`，取消归档得自己写它的状态（**这个 dsh 版本没有 unarchive API**）。宿主耦合集中在 `lib/archive-adapter.js` 一个文件，启动时探测一次：
-
-- 宿主升级后少了哪一环，插件**不装作没事**：启动日志写一行 `archive support is incomplete … missing: …`，面板顶部说明原因，相关按钮与菜单项置灰，树视图其余功能照常。
-- 读不到归档集合时**不猜**：宁可什么都不做，也不谎报「没有会话被隐藏」。
-
-</details>
-
-<details>
-<summary><b>开发与测试</b></summary>
-
-```bash
-npm run build   # 把客户端半边 plugin.client.js 打成 lib/client.js
-npm test        # 校验产物是最新的，然后跑全部测试
-```
-
-测试是**行为级**的：客户端半边在 jsdom 里按真实的 slot 注册挂载，用真实 DOM 事件驱动，断言的是卡片属性、POST 载荷与导航调用，而不是内部实现。当前 **14 个测试文件 / 122 条用例**，本机实跑全绿。
+只有一条路由，挂在宿主半边：
 
 ```
-lib/index.js            宿主半边：分支引擎、归档适配、HTTP 接口
+GET  /tree-view?sessionId=…   读这个家族：家族 DAG、轮次边界、归档状态、正在跑什么
+POST /tree-view               建一条分支（截断 → 写标记 → 建 agent → 送改后的提问）
+POST /tree-view  action=…     activate 取消归档 · label 命名 · promote 放回 · demote 收进树 · demoteOthers 收齐
+```
+
+分叉写入的持久事件是 `message-tree/version`，带 `ignorable: true` 信封标志 —— 少了它，读取端会拒绝解释整份日志，会话直接打不开。
+
+```
+lib/index.js            宿主半边 —— 路由 / 分支事务 / 家族遍历
+lib/tree-logic.js       树构建与布局（纯函数，宿主与客户端共用）
+lib/tree-state.js       分支名与归档归属的 sidecar
+lib/session-record.js   把各版本的会话记录读成同一种形状
+lib/archive-adapter.js  唯一与宿主归档强耦合的地方
 plugin.client.js        客户端半边（源）
-lib/client.js           客户端半边（产物，由 scripts/build-client.mjs 打包）
-lib/archive-adapter.js  宿主归档能力探测
-test/                   行为级测试
+lib/client.js           客户端半边（产物，scripts/build-client.mjs 打包）
+test/                   14 个行为级测试文件
 docs/                   架构 / 树数据模型 / 开发
 ```
 
+宿主半边不热重载（改 `lib/index.js` 要重启 profile），客户端半边刷新页面即可。
+
 </details>
 
-## 卸载
+## 参与贡献
 
-```bash
-dsh plugin --profile web remove dsh-tree-view
-```
+Issue 和 PR 都欢迎。改完先跑 `npm test`。
 
-不会删除任何会话。
+## 许可证
 
-## 文档
+[MIT](./LICENSE)
 
-- [架构概览](docs/ARCHITECTURE.md) —— 宿主 / 客户端拆分、Cordis 服务注入、持久事件与 HTTP 接口。
-- [树数据模型与算法](docs/TREE_DATA_MODEL.md) —— 轮次级树构建、同级展开、Ghost 桥接、高亮路径、长段折叠、主对话换位。
-- [开发与测试](docs/DEVELOPMENT.md) —— 构建流程、测试与本地安装。
+<div align="center">
+<sub>TreeView —— 以树形视图使用会话</sub>
 
-## 兼容性
-
-| | |
-|---|---|
-| **DSH** | 已验证 `0.1.5-rc.2`；`engines.dsh` 声明 `>=0.1.5-rc.2 <0.1.6-0`。更新插件后请重启 DSH。 |
-| **Profile** | 带 web UI 的 profile（`web`；`desktop` 加上同一行也可以） |
-| **界面语言** | 跟随 DSH 的显示语言 |
-| **依赖** | 自身不带运行时依赖 |
-
-## 贡献
-
-Issues 与 PR 都欢迎。改完先跑 `npm test`。
-
-## 许可
-
-[MIT](./LICENSE) © Rice00（dsh-tree-view）
-
-本仓库是 [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit)（MIT © SpookySandwich）的 fork，其宿主端分支逻辑源自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)（MIT © Moeblack）。两段原始版权声明按 MIT 要求保留在 `LICENSE`。
+MIT License © Rice00
+</div>

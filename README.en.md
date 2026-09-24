@@ -1,157 +1,172 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="dsh-tree-view" width="150" />
+<img src="assets/logo.png" alt="dsh-tree-view" width="140" />
 
 # dsh-tree-view
 
-**One conversation = one tree = one sidebar entry**
+**TreeView — use a conversation as a tree**
 
-Use a conversation as a tree view in DeepSeek Harness: edit an old message and the conversation forks from that turn — **every fork lives in one tree**, and the sidebar never grows a second entry.
+Edit an old message and the conversation forks from that turn; every version lives in one tree, and the sidebar keeps a single entry.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f7de1.svg)](./LICENSE)
-[![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#compatibility)
-[![DSH: 0.1.5-rc.2](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff.svg)](#compatibility)
+[![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#install)
+[![DSH: 0.1.5-rc.2](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff.svg)](#faq)
 [![PRs: welcome](https://img.shields.io/badge/PRs-welcome-7096d1.svg)](#contributing)
 [![GitHub stars](https://img.shields.io/github/stars/Rice00/dsh-tree-view?style=flat&label=stars&color=7096d1)](https://github.com/Rice00/dsh-tree-view/stargazers)
-
-[Features](#features) · [Install](#install) · [Quick start](#quick-start) · [Settings](#settings) · [How it works](#how-it-works) · [**中文**](./README.md)
 
 </div>
 
 ---
 
+**Edit a message you already sent**, or use DSH's own **Branch into a new conversation** button — either way it grows a new branch here:
+
+![The version ring under a user message, with the edit / copy / retry buttons](assets/screenshot-ring.png)
+
+Switch the conversation panel to Tree and the whole family is drawn on one canvas:
+
+![The Tree tab: a shared trunk, a fork at turn 11, a run of 8 turns folded into a stack of sheets, and a subagent session tagged as one](assets/screenshot-tree.png)
+
 ## Features
 
-| | |
+| Feature | What it does |
 |---|---|
-| 🌳 **One tree holds the whole family** | The **Tree** tab draws versions as a turn-level branch graph: the shared opening collapses into one trunk, each fork opens into a branch. |
-| 🎯 **The line you read is highlighted** | Where I came from, where I am, where I can still go — off one picture. |
-| 📌 **The sidebar never grows a second entry** | Whichever version holds the sidebar slot follows the line you read; the slot count never grows, and it is always reversible. |
-| ✋ **Your sessions are never collected behind your back** | Editing, retrying, opening a session from the sidebar, restoring where you last read — none of them touches an archived flag. Only picking a version from the tree moves the slot. |
-| 🗂️ **Long stretches fold themselves** | A run of turns that offers no choice folds into a stack of offset sheets whose colour follows state; the threshold is counted per stretch, so a short one is never folded because a long one sits next to it. |
-| 👁️ **What you need stays visible** | The start of the conversation, fork points, the end of a line, and the turn you are generating right now never fold away. |
-| 🤖 **Subagent conversations are labelled** | A subagent hangs its session under your conversation, which the tree would otherwise draw as a version of your message; those cards carry a subagent tag so they read as what they are. |
-| ♻️ **Collect and put back, always reversible** | Both just flip the archived state: no session is created, copied, or deleted. |
-| ⚙️ **Every switch in one place** | Settings → **TreeView**, five items, each described in the panel and previewed live. |
-| 🔒 **A view, not a rewrite** | Drawing the tree, swapping the slot and folding are all client-side behaviour; not one byte of the session log changes. |
-| 🧩 **Coexists with upstream** | Row id `tree-view`, route `/tree-view`; the durable event type stays upstream's `message-tree/version`, so sessions already branched there read as trees here. |
-| 🎨 **Follows the DSH theme** | Surface, border, accent, state and even shadow colours come from tokens the host actually defines: light follows light, dark follows dark, with no hardcoded dark value left. |
+| **Jump to a branch** | Every node is a real session version; clicking it moves you onto that line. Underneath it is only an archived flag being flipped: the version you clicked is unarchived back into the sidebar, and the one you were reading is archived into the tree — so moving around the tree moves the sidebar slot rather than adding to it. |
+| **Parallel lines** | A version *is* a session. Right-click and send several of them "back into the main chat" — that step only unarchives, it touches nothing else — and two branches can work at the same time without disturbing each other; collect them again when you are done. |
+| **One-click collect** | The panel toolbar's "collect every other branch" gathers the family's strays into the tree at once, leaving the one you are using. If any of them is still generating a reply it asks first — stop and collect, or cancel — so nothing is killed quietly. |
+| **Folding** | A run of turns with no fork in it — the opening every version shares included — folds into a single node once it reaches the configured length; click to unfold. The threshold is chosen in Settings and the toolbar folds it back at any time. |
+| **Hiding empty forks** | Forks that only copied this conversation without adding a turn of their own are not drawn; the toolbar carries the same switch. |
+| **Renaming branches** | Right-click a node to name a branch. The sidebar title stays the host's own (`(1)`, `(2)` and all) — only the box drawn in the tree is named. |
+| **Version ring** | The `‹ n/m ›` ring under a message, to move between versions of the same question without leaving the chat. |
+| **Highlighted reading path** | The whole line you are reading — shared opening included — is highlighted on the canvas, so where you came from, where you are and where you can still go read off one picture. |
+| **Resume where you left off** | Coming back to this family from another conversation resumes the version you last read (off by default; switchable in Settings). |
+| **Subagent tags** | A subagent session hanging under this conversation carries a tag, so it is not read as one of your versions. |
+| **Following the theme** | Surface, border, accent, state and even shadow colours come from the host's theme tokens: light follows light, dark follows dark. |
+
+## How it works
+
+| Point | Detail |
+|---|---|
+| **A rewind, not a continuation** | When you edit, the host seeds a new session with every event before that turn and sends the edited prompt into it — the new version restarts from the sentence you changed, with the same working directory and context. DSH's own "Branch into a new conversation" produces the same kind of history-seeded session, and the plugin reads its fork point off the seed length just the same. |
+| **Old versions survive** | The original line is still in the tree; one click goes back to it, and both lines can keep going independently. |
+| **Nothing collects on your behalf** | Editing, retrying, opening a session from the sidebar and restoring where you last read change no archived flag at all — only picking a version from the tree, or pressing "collect every other branch", does. Otherwise one casual rewording would quietly collect the session you were in. |
+
+## Legend
+
+| On the canvas | What it is |
+|---|---|
+| The trunk | The opening every version shares — the turns before the first fork |
+| A fork | One edit: one side is the original, the other is the rewritten version |
+| The highlighted line | The version you are reading, from the start of the conversation to the turn on screen |
+| A stack of sheets | A run of consecutive turns folded together |
+
+Pan, zoom with the wheel, click a node to jump there; right-click a node to rename it or to decide whether it lives in the sidebar or in the tree.
+
+## Archive and restore
+
+Archiving is the only switch this plugin touches on your data, so it gets its own section:
+
+- **Into the tree** archives that version out of the DSH sidebar; **back into the main chat** unarchives it. This DSH build ships no unarchive API, so the plugin writes that state the way the archive registry itself does — all of it in `lib/archive-adapter.js`, probed at startup: whatever the host is missing is logged, the affected buttons grey out, and the rest of the tree keeps working.
+- **Nothing is deleted, copied or rewritten.** The session log is append-only, and apart from the one `message-tree/version` marker a fork has to write, the plugin adds nothing to it.
+- **After uninstalling**, every session is still there; the versions that were collected into the tree can be unarchived from DSH's own archive list. Branch names and "who was collected" live in `~/.dsh/storages/tree-view/state.json` — harmless to keep, and deleting it does not affect any session.
 
 ## Install
+
+Install from GitHub (not published to npm yet):
 
 ```bash
 dsh plugin --profile web add github:Rice00/dsh-tree-view
 ```
 
-Then **restart that profile** — host plugin modules are cached in-process, so a running harness will not pick the new row up. UI-only changes just need a page refresh.
+The patch inserts one row (`tree-view`) into the profile. Then **restart that profile** — host plugin modules are cached in-process, so a running harness will not pick the new row up; UI-only changes just need a page refresh.
 
-To get changes live, point at a local checkout instead — `link:` is a live link, so edits to the source take effect immediately:
+Or install a local checkout, to have edits take effect immediately (`link:` is a live link, and the folder must not move afterwards):
 
 ```bash
-dsh plugin --profile web add link:<absolute-path-to-repo>
+git clone https://github.com/Rice00/dsh-tree-view.git
+dsh plugin --profile web add link:/abs/path/to/dsh-tree-view
 ```
 
 <details>
-<summary><b>Let an AI assistant do it (copy-paste)</b></summary>
+<summary>Let an AI assistant do it (copy-paste)</summary>
 
 ```
-Please install the DSH plugin dsh-tree-view for me:
-
-1) Install it into the web profile, from GitHub:
-     dsh plugin --profile web add github:Rice00/dsh-tree-view
-   or from a local checkout (absolute path of the folder):
-     dsh plugin --profile web add link:<absolute-path>
-2) Restart that profile. Host plugin modules are cached in-process, so the new row is
-   only picked up on boot. (UI-only changes just need a browser refresh.)
-3) Verify: a TreeView section appears in Settings; a Tree tab appears in the conversation panel.
-   The startup log should carry a tree-view line.
+Please install the DSH plugin dsh-tree-view:
+1) Into the web profile: dsh plugin --profile web add github:Rice00/dsh-tree-view
+   (from a local checkout: dsh plugin --profile web add link:<absolute-path>)
+2) Restart that profile; UI-only changes just need a browser refresh.
+3) Verify: a Tree tab in the conversation panel, a TreeView section in Settings.
 ```
 
 </details>
 
-## Quick start
+## Relationship to upstream
 
-1. **Edit a message you already sent** — the conversation forks from that turn, the way ChatGPT and Claude do it, instead of continuing from the end.
-2. **See the whole family** — the **Tree** tab in the conversation panel: pan, zoom with the wheel, click a node to jump.
-3. **Collect or put back** — right-click any node; both actions only flip its archived state.
+This repository is a fork of [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit), which supplies the host-side branching engine (itself built on [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)). The emphasis differs: upstream is a "edit message" plugin, while this fork takes "where do the versions made by editing live" as the main problem — hence the tree, the slot swap and folding.
+
+Both can coexist: the row id (`tree-view`) and the HTTP route (`/tree-view`) are its own, while the **durable event type stays upstream's `message-tree/version`**, so a session already branched upstream still reads as a tree here, with no data migration. Installing this without upstream is fine — upstream is not a dependency.
+
+## FAQ
+
+**Will it make a mess of my sessions?**
+No. Editing only produces a new version, the original is never rewritten, and nothing collects on your behalf — the sidebar changes only when you pick a version or press "collect every other branch".
+
+**Where do the collected versions go?**
+They are in the Tree tab; right-click and choose "back into the main chat" to return one to the sidebar, or unarchive it from DSH's own archive list.
+
+**Can I have several branches running at once?**
+Yes. Every version is an independent session — put each one back into the main chat and they run in parallel; collect them into the tree again when you are done.
+
+**What about very large families?**
+Folding exists for that: the threshold can be set to Never, and any run can be folded or unfolded by hand.
+
+**Do conversations branched with DSH's own button show up in the tree?**
+Yes. They are history-seeded sessions too, so the plugin derives the fork point from the seed length and draws them as a version on that line. DSH itself limits that button to the last message of a completed turn; the plugin does not change that.
+
+**Which DSH versions are supported?**
+Verified against `0.1.5-rc.2`; `engines.dsh` declares `>=0.1.5-rc.2 <0.1.6-0`. Restart DSH after updating the plugin.
 
 ## Settings
 
-Everything lives under **Settings → TreeView**:
+Settings → **TreeView**, five rows, each described in the panel:
 
 | Setting | Default | Effect |
-| --- | --- | --- |
-| Message control style | DeepSeek | ChatGPT / DeepSeek / Claude button layouts, previewed live in the panel |
-| Open the version I was last reading | off | Coming back to this family from elsewhere resumes the version you last read |
-| Stop the reply that is still being written | on | Stop a running reply in the same family before editing / retrying, saving quota |
-| Hide forks with no new turns | on | Forks that only copied this conversation without adding turns are not drawn |
-| Fold long straight stretches | 8 turns and up | Never / 5 / 8 / 12 / 20 |
+|---|---|---|
+| Message control style | `DeepSeek` | `ChatGPT` / `DeepSeek` / `Claude` button layouts, previewed live in the panel. |
+| Open the version I was last reading | `off` | See "Resume where you left off". |
+| Stop the reply that is still being written | `on` | Stop every running reply in the same family (other versions included) before branching, saving quota — and letting you edit mid-reply. |
+| Hide forks with no new turns | `on` | See "Hiding empty forks"; the Tree toolbar carries the same switch. |
+| Fold long straight stretches | `8 turns and up` | `Never` / `5` / `8` / `12` / `20`, counted per run — see "Folding". |
 
-## How it works
-
-A DSH session is an append-only event log with no notion of an in-session branch, so rewind is implemented here:
-
-1. **Seed a new session** — when you edit, the host creates a new session seeded with "every event before the target turn", writes a durable `message-tree/version` marker describing the edit, then sends the edited prompt into it. That is a real rewind, not a continuation from the end.
-2. **Read the markers back to rebuild the tree** — the client turns those markers into the tree, the version counter, and the line you are currently on.
-3. **`ignorable` is mandatory** — the plugin's custom event type is not in the host's event vocabulary; without that envelope flag the reader refuses to interpret the whole log and the session will not open at all.
-
-The host-side branching engine comes from [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit) (MIT © Moeblack); this fork rebuilds it around ChatGPT-style rewind semantics.
-
----
+## For developers
 
 <details>
-<summary><b>It never fails silently</b></summary>
+<summary>Route, event and file layout</summary>
 
-Archiving and unarchiving go through `ctx.workspaceRegistry`: archiving uses the supported `archiveSession`, while unarchiving has to write its state directly (**this dsh version has no unarchive API**). That coupling sits in one file, `lib/archive-adapter.js`, probed once at startup:
-
-- If a host upgrade drops a piece, the plugin **does not pretend otherwise**: the startup log carries `archive support is incomplete … missing: …`, the panel says so at the top, the collect / put-back buttons and menu items grey out with the reason, and the rest of the tree view keeps working.
-- If the archive set cannot be read, the plugin **does not guess**: it would rather do nothing than claim "no session is hidden".
-
-</details>
-
-<details>
-<summary><b>Development and tests</b></summary>
-
-```bash
-npm run build   # bundle the client half plugin.client.js into lib/client.js
-npm test        # verify the bundle is current, then run every test
-```
-
-The tests are **behavioural**: the client half is mounted in jsdom through its real slot registrations and driven by real DOM events, asserting card attributes, POST payloads and navigation calls rather than internals. Currently **14 test files / 122 cases**, all green when run here.
+One route, registered by the host half:
 
 ```
-lib/index.js            host half: branching engine, archive adapter, HTTP endpoints
+GET  /tree-view?sessionId=…   read the family: the DAG, turn boundaries, archive state, what is running
+POST /tree-view               build a branch (truncate → write the marker → create the agent → send the edited prompt)
+POST /tree-view  action=…     activate · label · promote · demote · demoteOthers
+```
+
+The durable event written when branching is `message-tree/version`, carrying the `ignorable: true` envelope flag — without it the reader refuses to interpret the whole log and the session will not open at all.
+
+```
+lib/index.js            host half — route / branch transactions / family walk
+lib/tree-logic.js       tree building and layout (pure, shared by host and client)
+lib/tree-state.js       sidecar for branch names and archive ownership
+lib/session-record.js   reads every version's record into one shape
+lib/archive-adapter.js  the only hard coupling to host archiving
 plugin.client.js        client half (source)
 lib/client.js           client half (bundle, built by scripts/build-client.mjs)
-lib/archive-adapter.js  host archive capability probe
-test/                   behavioural tests
+test/                   14 behavioural test files
 docs/                   architecture / tree data model / development
 ```
 
+The host half does not hot-reload (editing `lib/index.js` needs a profile restart); the client half just needs a refresh.
+
 </details>
-
-## Uninstall
-
-```bash
-dsh plugin --profile web remove dsh-tree-view
-```
-
-No session is deleted.
-
-## Docs
-
-- [Architecture](docs/ARCHITECTURE.md) — host / client split, Cordis service injection, durable events and HTTP endpoints.
-- [Tree data model and algorithms](docs/TREE_DATA_MODEL.md) — turn-level tree building, sibling expansion, ghost bridging, highlighted path, long-stretch folding, main-chat swap.
-- [Development](docs/DEVELOPMENT.md) — build pipeline, tests, local install.
-
-## Compatibility
-
-| | |
-|---|---|
-| **DSH** | verified against `0.1.5-rc.2`; `engines.dsh` declares `>=0.1.5-rc.2 <0.1.6-0`. Restart DSH after updating the plugin. |
-| **Profile** | any profile that carries the web UI (`web`; `desktop` works when the same row is added there) |
-| **Language** | the UI follows the display language of DSH |
-| **Dependencies** | none of its own at runtime |
 
 ## Contributing
 
@@ -159,6 +174,10 @@ Issues and pull requests are welcome. Run `npm test` before opening a PR.
 
 ## License
 
-[MIT](./LICENSE) © Rice00 (dsh-tree-view)
+[MIT](./LICENSE)
 
-This repository is a fork of [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit) (MIT © SpookySandwich), whose host-side branching logic comes from [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit) (MIT © Moeblack). Both original copyright notices are kept in `LICENSE` as MIT requires.
+<div align="center">
+<sub>TreeView — use a conversation as a tree</sub>
+
+MIT License © Rice00
+</div>
