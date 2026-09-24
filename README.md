@@ -1,81 +1,80 @@
-<p align="center">
-  <img src="assets/logo.png" alt="dsh-tree-view" width="180">
-</p>
+<div align="center">
 
-<h1 align="center">dsh-tree-view</h1>
+<img src="assets/logo.png" alt="dsh-tree-view" width="150" />
 
-<p align="center"><b>以树形视图使用会话</b></p>
+# dsh-tree-view
 
-<p align="center">一条消息改过之后，对话从那一刻重新分叉。所有分叉留在同一棵树里，侧栏只占一个位置。</p>
+**一个对话 = 一棵树 = 侧栏一个入口**
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/dsh-tree-view"><img src="https://img.shields.io/npm/v/dsh-tree-view?color=cb3837&logo=npm" alt="npm"></a>
-  <a href="https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml"><img src="https://github.com/Rice00/dsh-tree-view/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="license"></a>
-  <img src="https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff" alt="dsh">
-</p>
+在 DeepSeek Harness 里以树形视图使用会话：编辑一条旧消息，对话从那一刻重新分叉，而**所有分支住进同一棵树** —— 侧栏里永远只占一个位置。
 
-<p align="center"><a href="README.en.md">English</a> | 简体中文</p>
+[![License: MIT](https://img.shields.io/badge/License-MIT-2f7de1.svg)](./LICENSE)
+[![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#兼容性)
+[![DSH: 0.1.5-rc.2](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff.svg)](#兼容性)
+[![PRs: welcome](https://img.shields.io/badge/PRs-welcome-7096d1.svg)](#贡献)
+[![GitHub stars](https://img.shields.io/github/stars/Rice00/dsh-tree-view?style=flat&label=stars&color=7096d1)](https://github.com/Rice00/dsh-tree-view/stargazers)
 
-## 会话本来就该是一棵树
+[特色](#特色) · [安装](#安装) · [上手](#上手) · [设置](#设置) · [原理](#它是怎么做到的) · [**English**](./README.en.md)
 
-DSH 的会话是一份仅追加的事件日志。在它之上编辑一条历史消息，唯一诚实的做法就是**从那一轮之前重新开始**，于是同一个话题长出多个版本 —— 和 ChatGPT、Claude 一样。
+</div>
 
-分叉本身没有错，问题是它们没有地方住。默认的世界里，每个版本都是侧栏里一个平级的会话：标题后面挂着 `(1)`、`(2)`、`(3)`，谁是谁的前身、哪一步改出来的、现在读到哪，全靠脑子记。分叉越多，侧栏越长。
-
-dsh-tree-view 换一种记法：
-
-> **一个对话 = 一棵树 = 侧栏一个入口。**
-
-版本之间的关系画成树，树的形状就是这段对话的来路；侧栏里只留一个入口，由你正在读的那个版本占着。
+---
 
 ## 特色
 
-### 树的形状就是对话的来路
-
-**Tree** 标签页把整个家族画成轮次级的分支图：共用的开头合并成一条主干，分叉处张开成枝。你正在读的那条线整体高亮，于是「我从哪来、现在在哪、还能去哪」在一张图里读完。
-
-### 侧栏永远只有一个入口
-
-这不是「多了一个切版本的按钮」，而是**哪个版本占着侧栏那个位置，跟着你读哪条线走**：把一个旧版本放回主对话，你原本在读的那条就收进树里 —— 位置不增加，反悔也随时可以。
-
-而且**只有你从树里挑版本时才换位**。编辑、重试、从侧栏打开会话、恢复上次的阅读位置，都会碰巧把你带到另一个版本，但它们一个归档状态都不改 —— 否则你随手改一次措辞，原来的会话就被悄悄收走了。
-
-### 大树也看得清
-
-家族长大后，最占地方的往往是那些没有任何选择点的长段：所有分支共用的开头，或者某条线一路直下的一长串轮次。它们达到设定长度就折成一个节点，画成一叠错开的薄片，颜色跟着状态走 —— 在你正读的线上是强调色，不在线上是中性灰。
-
-阈值**按每一段各算**，短段不会因为旁边有长段而被折掉；对话起点、分叉点、线的末尾，以及**你正在生成的那一轮**，永远不折进去。折与不折随时能改。
-
-### 收起和放回，随时可逆
-
-任何一个版本都可以「收到 Tree 里」或「放到主对话」。这两件事只翻转它的归档状态：不新建、不复制、不删除任何会话。
-
-### 子代理会话有标识
-
-子代理会把自己的会话挂在你的对话下面，工作目录也一样 —— 家族树因此把它当成一条分支画出来（实测某个会话下面就有 4 个）。它不是你那句话的某个版本，所以它的卡片右上角会挂一枚「子代理」标签，一眼分辨。
-
-### 跟随 DSH 主题
-
-所有颜色都取自宿主自己的主题变量：背景、边框、强调色、状态色，连阴影都是。浅色跟随浅色、深色跟随深色，插件里不留任何写死的深色值。有一条测试专门守着「不许再用宿主没定义的变量名」—— 那正是之前浅色主题下卡片仍然是深色的原因。
+| | |
+|---|---|
+| 🌳 **一棵树装下整个家族** | **Tree** 标签页把版本画成轮次级分支图：共用的开头合成主干，分叉处张开成枝。 |
+| 🎯 **在读的线整体高亮** | 我从哪来、现在在哪、还能去哪 —— 一张图读完。 |
+| 📌 **侧栏永远只有一个入口** | 哪个版本占着侧栏那个位置，跟着你读哪条线走；位置不会越用越多，反悔随时可以。 |
+| ✋ **绝不悄悄收走你的会话** | 编辑、重试、从侧栏打开会话、恢复上次阅读位置都不改归档状态 —— 只有你从树里挑版本时才换位。 |
+| 🗂️ **长段自动折叠** | 没有任何选择点的连续轮次折成一叠薄片，颜色跟着状态走；阈值按每一段各算，短段不会被旁边的长段连累。 |
+| 👁️ **该看的永远看得见** | 对话起点、分叉点、线的末尾，以及你正在生成的那一轮，从不折进去。 |
+| ♻️ **收起与放回，随时可逆** | 只翻转归档状态：不新建、不复制、不删除任何会话。 |
+| ⚙️ **开关集中在一处** | 设置 → **TreeView**，五项，面板里逐项说明并实时预览。 |
+| 🔒 **纯视图，不动数据** | 画树、换位、折叠全部是客户端行为，会话日志一个字节都不改。 |
+| 🧩 **可与上游并存** | 行 id `tree-view`、路由 `/tree-view`；持久事件类型保留上游的 `message-tree/version`，已经分过叉的会话直接读出树。 |
 
 ## 安装
 
 ```bash
-dsh plugin --profile web add dsh-tree-view
+dsh plugin --profile web add github:Rice00/dsh-tree-view
 ```
 
-装完**重启 DSH**（宿主半边随服务器加载）。界面跟随 DSH 的显示语言。
+装完**重启该 profile**（宿主插件模块在进程内缓存，不重启不会加载新行；只改界面的话刷新页面即可）。
 
-开发期想改完即用，直接装本地目录：
+想改完即用，就指向本地仓库 —— `link:` 是活链接，源码改完立刻生效：
 
 ```bash
-dsh plugin --profile web add file:<仓库路径>
+dsh plugin --profile web add link:<仓库绝对路径>
 ```
+
+<details>
+<summary><b>让 AI 助手帮你装（整段复制）</b></summary>
+
+```
+请帮我安装 DSH 插件 dsh-tree-view：
+
+1) 装进 web profile：
+     dsh plugin --profile web add github:Rice00/dsh-tree-view
+   或从本地仓库装（填绝对路径）：
+     dsh plugin --profile web add link:<绝对路径>
+2) 重启该 profile。宿主插件模块在进程内缓存，不重启不会加载新行；只改界面的话刷新页面即可。
+3) 验证：设置里出现 TreeView 分类；会话面板出现 Tree 标签页。
+   启动日志里应有一行 tree-view。
+```
+
+</details>
+
+## 上手
+
+1. **编辑一条已经发出的消息** —— 对话从那一轮重新分叉，与 ChatGPT、Claude 一致，不是从末尾续写。
+2. **看全貌** —— 会话面板的 **Tree** 标签页：可平移、滚轮缩放、点节点跳过去。
+3. **收进树 / 放回侧栏** —— 右键任意节点；两个动作都只翻转归档状态。
 
 ## 设置
 
-全部在 **设置 → TreeView**，面板里带逐项说明：
+全部在 **设置 → TreeView**：
 
 | 设置 | 默认 | 作用 |
 | --- | --- | --- |
@@ -87,33 +86,54 @@ dsh plugin --profile web add file:<仓库路径>
 
 ## 它是怎么做到的
 
-DSH 的日志没有「会话内分支」，所以回溯得自己实现。三步：
+DSH 的会话是仅追加的事件日志，本身没有「会话内分支」，所以回溯得自己实现：
 
-1. **新建会话做种子** —— 编辑时，宿主以「目标轮次之前的全部事件」为种子创建一个新会话，写入一条持久的 `message-tree/version` 标记说明改了什么，再把改后的提问送进去。这才是真正的回溯，而不是从末尾续写。
+1. **新建会话做种子** —— 编辑时，宿主以「目标轮次之前的全部事件」为种子创建一个新会话，写入一条持久的 `message-tree/version` 标记说明改了什么，再把改后的提问送进去。这才是真正的回溯。
 2. **读回标记还原树** —— 客户端读到这些标记，就能画出整棵树、版本计数，以及你当前站在哪条线上。
 3. **`ignorable` 不能少** —— 插件自定义的事件类型不在宿主的事件词表里，缺了这个信封标志，读取端会拒绝解释整份日志，会话直接打不开。
 
-树的画法、换位、折叠**全部是客户端视图行为**，不改动任何数据。
+宿主端的分支引擎来自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)（MIT © Moeblack），本 fork 在其上重做为 ChatGPT 式回溯语义。
 
-宿主端的分支引擎来自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)（MIT © Moeblack），本 fork 在其上重做为 ChatGPT 式回溯语义与上述规则。
+---
 
-**身份**：cordis 行 id 是 `tree-view`、路由 `/tree-view`，与上游的 `message-tree` 分开，两个插件可以并存；但**持久事件类型刻意保留上游的 `message-tree/version`** —— 上游已经分过叉的会话，在这里照样能读出树，迁移不用改数据。
+<details>
+<summary><b>不会静默坏</b></summary>
 
-## 不会静默坏
+归档 / 取消归档走 `ctx.workspaceRegistry`：归档用它支持的 `archiveSession`，取消归档得自己写它的状态（**这个 dsh 版本没有 unarchive API**）。宿主耦合集中在 `lib/archive-adapter.js` 一个文件，启动时探测一次：
 
-归档 / 取消归档走 `ctx.workspaceRegistry`：归档用它支持的 `archiveSession`，取消归档得自己写它的状态（**这个 dsh 版本没有 unarchive API**）。这块宿主耦合集中在 `lib/archive-adapter.js` 一个文件里，启动时探测一次：
+- 宿主升级后少了哪一环，插件**不装作没事**：启动日志写一行 `archive support is incomplete … missing: …`，面板顶部说明原因，相关按钮与菜单项置灰，树视图其余功能照常。
+- 读不到归档集合时**不猜**：宁可什么都不做，也不谎报「没有会话被隐藏」。
 
-- 宿主升级后少了哪一环，插件**不会装作没事**：启动日志写一行 `archive support is incomplete … missing: …`，面板顶部直接说明，「收起 / 放到主对话」相关按钮与菜单项置灰并给出原因，树视图其余功能照常。
-- 读不到归档集合时，插件**不猜**：宁可什么都不做，也不谎报「没有会话被隐藏」。
+</details>
 
-## 开发与测试
+<details>
+<summary><b>开发与测试</b></summary>
 
 ```bash
 npm run build   # 把客户端半边 plugin.client.js 打成 lib/client.js
 npm test        # 校验产物是最新的，然后跑全部测试
 ```
 
-测试是**行为级**的：客户端半边在 jsdom 里按真实的 slot 注册挂载，用真实 DOM 事件驱动，断言的是卡片属性、POST 载荷与导航调用，而不是内部实现。当前 **13 个文件 / 118 条断言**，覆盖树构建、折叠与换位规则、工具栏与确认框、设置面板、记忆与恢复、图片渲染、注册与降级、归档适配器、宿主兼容。
+测试是**行为级**的：客户端半边在 jsdom 里按真实的 slot 注册挂载，用真实 DOM 事件驱动，断言的是卡片属性、POST 载荷与导航调用，而不是内部实现。当前 **13 个文件 / 118 条断言**。
+
+```
+lib/index.js            宿主半边：分支引擎、归档适配、HTTP 接口
+plugin.client.js        客户端半边（源）
+lib/client.js           客户端半边（产物，由 scripts/build-client.mjs 打包）
+lib/archive-adapter.js  宿主归档能力探测
+test/                   行为级测试
+docs/                   架构 / 树数据模型 / 开发
+```
+
+</details>
+
+## 卸载
+
+```bash
+dsh plugin --profile web remove dsh-tree-view
+```
+
+不会删除任何会话。
 
 ## 文档
 
@@ -121,7 +141,21 @@ npm test        # 校验产物是最新的，然后跑全部测试
 - [树数据模型与算法](docs/TREE_DATA_MODEL.md) —— 轮次级树构建、同级展开、Ghost 桥接、高亮路径、长段折叠、主对话换位。
 - [开发与测试](docs/DEVELOPMENT.md) —— 构建流程、测试与本地安装。
 
-## 兼容性与许可
+## 兼容性
 
-- 已验证 dsh **`0.1.5-rc.2`**；`engines.dsh` 声明 `>=0.1.5-rc.2 <0.1.6-0`。DSH 迭代很快，未验证的版本不在保证范围内；更新插件后请重启 DSH。
-- MIT © Rice00（dsh-tree-view）。本仓库是 [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit)（MIT © SpookySandwich）的 fork，其宿主端分支逻辑源自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)（MIT © Moeblack）。两段原始版权声明按 MIT 要求保留在 `LICENSE`。
+| | |
+|---|---|
+| **DSH** | 已验证 `0.1.5-rc.2`；`engines.dsh` 声明 `>=0.1.5-rc.2 <0.1.6-0`。更新插件后请重启 DSH。 |
+| **Profile** | 带 web UI 的 profile（`web`；`desktop` 加上同一行也可以） |
+| **界面语言** | 跟随 DSH 的显示语言 |
+| **依赖** | 自身不带运行时依赖 |
+
+## 贡献
+
+Issues 与 PR 都欢迎。改完先跑 `npm test`。
+
+## 许可
+
+[MIT](./LICENSE) © Rice00（dsh-tree-view）
+
+本仓库是 [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit)（MIT © SpookySandwich）的 fork，其宿主端分支逻辑源自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)（MIT © Moeblack）。两段原始版权声明按 MIT 要求保留在 `LICENSE`。
