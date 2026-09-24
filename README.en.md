@@ -4,7 +4,9 @@
 
 <h1 align="center">dsh-tree-view</h1>
 
-<p align="center">One conversation = one tree = one sidebar entry</p>
+<p align="center"><b>Use a conversation as a tree view</b></p>
+
+<p align="center">Edit a message and the conversation forks from that turn. Every fork stays in one tree, and the sidebar keeps one entry.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-tree-view"><img src="https://img.shields.io/npm/v/dsh-tree-view?color=cb3837&logo=npm" alt="npm"></a>
@@ -15,65 +17,39 @@
 
 <p align="center">English | <a href="README.md">简体中文</a></p>
 
-Edit a message you already sent and the conversation **rewinds and branches from that point** — the way ChatGPT and Claude do it, not a fork that continues from the end. Nothing is overwritten: a `‹ 2/4 ›` counter appears under the bubble, and the **Tree** tab draws the whole thing.
+## A conversation wants to be a tree
 
-That is what separates this from a plain "edit message" plugin: it does not just let you change a sentence, it gives **every branch of a conversation somewhere to live**.
+A DSH session is an append-only event log. Editing a past message on top of it leaves exactly one honest option: **restart from before that turn**, so one topic grows several versions — the same way it works in ChatGPT and Claude.
 
-![demo](assets/demo.gif)
+Forking is not the problem. The problem is that forks have nowhere to live. By default every version is a sibling session in the sidebar: titles trailing `(1)`, `(2)`, `(3)`, and who came from whom, which edit produced what, and where you are reading now all live in your head. The more you branch, the longer the sidebar gets.
 
-## The 30-second version
+dsh-tree-view keeps the family a different way:
 
-- **Edit a message to rewind** — regenerate from before that turn, with the full context intact.
-- **Branches are a tree** — pan, wheel-zoom and click to jump in the Tree tab, with the line you are reading highlighted live.
-- **One sidebar entry per conversation** — switching versions swaps the entry instead of piling up more of them.
-- **Big families stay readable** — long straight stretches with no branching fold into one node, and open when clicked.
+> **One conversation = one tree = one sidebar entry.**
 
-## What it does
+Versions are drawn as a tree, and the shape of that tree is the history of the conversation. The sidebar keeps a single entry, held by whichever version you are reading.
 
-### 1. The main-chat swap: one conversation, one entry
+## What makes it different
 
-A conversation should occupy one place in the sidebar, and **which version occupies it follows you**. So a click is a swap:
+### The tree is the shape of the conversation
 
-| The node you click | What happens |
-| --- | --- |
-| **Collected in the tree** (in the tree, not in the sidebar) | It **comes back into the main chat** and the version you were reading is **collected into the tree** |
-| **Already in the main chat** | It **just opens** — nothing collected, nothing brought out |
-| **Part of the version you are reading** | Only the **Chat tab** comes forward, positioned at that turn |
+The **Tree** tab draws the whole family as a turn-level branch graph: the shared opening collapses into one trunk, and each fork opens into a branch. The line you are reading is highlighted end to end, so "where I came from, where I am, where I can still go" reads off one picture.
 
-Only two things trigger the swap: **clicking a node in the tree** and **the `‹ ›` ring under a bubble**. Everything else — a fork from an edit, opening a conversation from the sidebar, the last-version restore — **never touches archive membership**. That is deliberate: otherwise one stray edit would quietly put the original conversation away.
+### The sidebar never grows a second entry
 
-Two protections: a version that is still generating a reply is never collected, and one that is already in the tree has nothing left to collect.
+This is not "one more button for switching versions" — it is that **whichever version holds the sidebar slot follows the line you read**. Put an older version back into the main chat, and the one you were reading moves into the tree instead: the slot count never grows, and it is always reversible.
 
-### 2. Long-stretch folding: a big family is not one long pole
+And **nothing but picking a version from the tree moves that slot**. Editing, retrying, opening a session from the sidebar, restoring where you last read — each of those can land you on another version, yet none of them changes a single archived flag. Otherwise one casual rewording would quietly collect the session you were in.
 
-Inside a family, the opening every branch shares and any stretch a single branch runs straight through have no decision in them at all, yet they eat most of the canvas. So:
+### Big families stay readable
 
-- **Past the threshold they fold into one node** — Settings offers **Never / 5 / 8 / 12 / 20 or more turns** (default 8). The threshold counts **each stretch on its own**, so a short run is never folded just because a long one is nearby.
-- **Click it to unfold**, and the toolbar control unfolds and re-folds.
-- **Nothing you need is ever hidden** — the origin, the branch point, the end of the line, and **the turn you are writing** never fold away.
-- **Unmistakable at a glance** — a fold is drawn as a stack of sheets (offset down-right), and takes its colour from the card's state: accent on the line you are reading, neutral off it.
+As a family grows, the space is eaten by stretches that offer no choice at all: the opening every branch shares, or a line running straight down for turn after turn. Once such a stretch reaches the configured length it folds into a single node, drawn as a stack of offset sheets whose colour follows state — accent while you are on that line, neutral grey when you are not.
 
-### 3. The version tree
+The threshold is **counted per stretch**, so a short one is never folded just because a long one sits next to it; the start of the conversation, fork points, the end of a line, and **the turn you are currently generating** never fold away. Folding is reversible at any time.
 
-The **Tree** tab draws the whole family as a turn-level graph: pan it, wheel-zoom it, click any node to jump straight there. The line you are reading — including the shared history above it — is highlighted together, so "where I came from, where I am, where I can still go" is one look.
+### Collect and put back, always reversible
 
-![Version tree](assets/tree-demo.png)
-
-### 4. Collect and bring back, always reversible
-
-Right-click any node: **Collect into the tree** takes it out of the sidebar, **Move to main chat** puts it back. Both only flip archive membership — no session is created or deleted, and you can change your mind any time.
-
-### 5. One place for every switch
-
-All under **Settings → TreeView**:
-
-| Switch | Default | What it does |
-| --- | --- | --- |
-| **Message control style** | DeepSeek | ChatGPT / DeepSeek / Claude button layouts, previewed live in the panel |
-| **Open the version I was last reading** | off | Coming back to a family from another conversation opens the version you had open |
-| **Stop the reply that is still being written** | on | Editing or retrying first stops every reply still running in that family — saves tokens, and lets you edit mid-reply |
-| **Hide forks with no new turns** | on | A fork that only copied the conversation and never added a turn is not drawn |
-| **Fold long straight stretches** | 8 or more turns | See "Long-stretch folding": Never / 5 / 8 / 12 / 20 |
+Any version can be "collected into the Tree" or "put back into the main chat". Both simply flip its archived state: no session is created, copied, or deleted.
 
 ## Install
 
@@ -81,51 +57,63 @@ All under **Settings → TreeView**:
 dsh plugin --profile web add dsh-tree-view
 ```
 
-**Restart DSH** afterwards — the host half loads with the server. The interface follows DSH's display language.
+Restart DSH afterwards (the host half loads with the server). The UI follows the display language of DSH.
 
-While developing, install the checkout directly so edits take effect immediately:
+During development, install the local directory to get changes live:
 
 ```bash
-dsh plugin --profile web add file:<path-to-checkout>
+dsh plugin --profile web add file:<path-to-repo>
 ```
+
+## Settings
+
+Everything lives under **Settings → TreeView**, with per-item descriptions in the panel:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| Message control style | DeepSeek | ChatGPT / DeepSeek / Claude button layouts, previewed live in the panel |
+| Open the version I was last reading | off | Coming back to this family from elsewhere resumes the version you last read |
+| Stop the reply that is still being written | on | Stop a running reply in the same family before editing / retrying, saving quota |
+| Hide forks with no new turns | on | Forks that only copied this conversation without adding turns are not drawn |
+| Fold long straight stretches | 8 turns and up | Never / 5 / 8 / 12 / 20 |
 
 ## How it works
 
-A DSH session is an append-only event log with no in-session branching, so a rewind has to be built. Three steps:
+DSH's log has no notion of an in-session branch, so rewind is implemented here. Three steps:
 
-1. **Seed a new session.** Editing a message makes the host create a new session seeded with *every event before the target turn*, write a durable `message-tree/version` marker saying what changed, and submit the edited prompt. That is what makes it a real rewind.
-2. **Read the markers back.** The client reconstructs the tree, the `‹ n/m ›` counter and which line you are standing on from those markers.
-3. **The `ignorable` flag is not optional.** Plugin event types live outside the host's vocabulary; without that envelope flag the reader refuses to interpret the whole log and the session will not open at all.
+1. **Seed a new session** — when you edit, the host creates a new session seeded with "every event before the target turn", writes a durable `message-tree/version` marker describing the edit, then sends the edited prompt into it. That is a real rewind, not a continuation from the end.
+2. **Read the markers back to rebuild the tree** — the client turns those markers into the tree, the version counter, and the line you are currently on.
+3. **`ignorable` is mandatory** — the plugin's custom event type is not in the host's event vocabulary; without that envelope flag the reader refuses to interpret the whole log and the session will not open at all.
 
-Drawing the tree, the swap and the folding are **all client-side view behaviour** — no data is touched by looking at it.
+Drawing the tree, swapping the sidebar slot, and folding are **all client-side view behaviour** and change no data.
 
-The host-side branching engine comes from [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit) (MIT © Moeblack); this fork reworks it into ChatGPT-style rewind semantics and the rules above.
+The host-side branching engine comes from [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit) (MIT © Moeblack); this fork rebuilds it around ChatGPT-style rewind semantics and the rules above.
 
-**Identity:** this fork's cordis id is `tree-view` and its route is `/tree-view`, separate from upstream's `message-tree`, so both plugins can be installed side by side. The **durable event type deliberately keeps upstream's `message-tree/version`**, so a conversation upstream already branched still reads as a tree here — no data migration.
+**Identity**: the cordis row id is `tree-view` and the route is `/tree-view`, separate from upstream's `message-tree`, so both plugins can coexist. The durable event type intentionally stays `message-tree/version` — sessions already branched by upstream still read as trees here, with no data migration.
 
-## It fails loudly, never silently
+## It never fails silently
 
-Hiding and showing versions goes through `ctx.workspaceRegistry`: archiving uses the supported `archiveSession`, and unarchiving has to write the registry's own state (this build exposes **no unarchive API**). That coupling lives in one file, `lib/archive-adapter.js`, probed once at load:
+Archiving and unarchiving go through `ctx.workspaceRegistry`: archiving uses the supported `archiveSession`, while unarchiving has to write its state directly (**this dsh version has no unarchive API**). That coupling sits in one file, `lib/archive-adapter.js`, probed once at startup:
 
-- If a host upgrade removes part of the seam, the plugin **does not pretend otherwise**: the boot log gets one `archive support is incomplete … missing: …` line, the panel says so in place, and the affected controls (collect, move to main chat) are disabled with the reason on hover. Everything else keeps working.
-- If the archive set cannot be read, the plugin **does not guess**: it would rather do nothing than claim "nothing is hidden".
+- If a host upgrade drops a piece, the plugin **does not pretend otherwise**: the startup log carries `archive support is incomplete … missing: …`, the panel says so at the top, the "collect / put back" buttons and menu items grey out with the reason, and the rest of the tree view keeps working.
+- If the archive set cannot be read, the plugin **does not guess**: it would rather do nothing than claim "no session is hidden".
 
 ## Development and tests
 
 ```bash
-npm run build   # bundle the client half: plugin.client.js -> lib/client.js
-npm test        # check the bundle is current, then run every test
+npm run build   # bundle the client half plugin.client.js into lib/client.js
+npm test        # verify the bundle is current, then run every test
 ```
 
-The tests are **behavioural**: the client half is mounted in jsdom through its real slot registrations, driven with real DOM events, and asserts on card attributes, POST payloads and navigation calls rather than on internals. Today: **13 files / 118 assertions**, covering tree construction, the fold and swap rules, the toolbar and confirmation dialog, the settings panel, the remember/restore rules, image rendering, registration and degradation, the archive adapter and host compatibility.
+The tests are **behavioural**: the client half is mounted in jsdom through its real slot registrations and driven by real DOM events, asserting card attributes, POST payloads and navigation calls rather than internals. Currently **13 files / 118 assertions**, covering tree building, folding and swap rules, toolbar and confirm dialog, the settings panel, memory and restore, image rendering, registration and degradation, the archive adapter, and host compatibility.
 
-## Documentation
+## Docs
 
-- [Architecture](docs/ARCHITECTURE.md) — host/client split, Cordis service injection, the durable event model and the HTTP route.
-- [Tree Data Model](docs/TREE_DATA_MODEL.md) — turn-level tree construction, sibling fan-out, ghost bridging, path highlighting, long-stretch folding, the main-chat swap.
-- [Development](docs/DEVELOPMENT.md) — build pipeline, tests and local install.
+- [Architecture](docs/ARCHITECTURE.md) — host / client split, Cordis service injection, durable events and HTTP endpoints.
+- [Tree data model and algorithms](docs/TREE_DATA_MODEL.md) — turn-level tree building, sibling expansion, ghost bridging, highlighted path, long-stretch folding, main-chat swap.
+- [Development](docs/DEVELOPMENT.md) — build pipeline, tests, local install.
 
 ## Compatibility and licence
 
-- Verified against dsh **`0.1.5-rc.2`**; `engines.dsh` declares `>=0.1.5-rc.2 <0.1.6-0`. DSH moves fast, so unverified versions are not covered; restart DSH after updating the plugin.
-- MIT © Rice00 (dsh-tree-view). A fork of [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit) (MIT © SpookySandwich), whose host-side branching logic derives from [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit) (MIT © Moeblack). Both original copyright notices are kept in `LICENSE` as MIT requires.
+- Verified against dsh **`0.1.5-rc.2`**; `engines.dsh` declares `>=0.1.5-rc.2 <0.1.6-0`. DSH moves fast, so unverified versions are out of scope; restart DSH after updating the plugin.
+- MIT © Rice00 (dsh-tree-view). This repository is a fork of [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit) (MIT © SpookySandwich), whose host-side branching logic comes from [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit) (MIT © Moeblack). Both original copyright notices are kept in `LICENSE` as MIT requires.
