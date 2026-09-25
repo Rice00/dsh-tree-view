@@ -430,25 +430,53 @@ test('and marks one the host half has not learned about yet', async (t) => {
   assert.ok(card.textContent.includes('subagent'), 'tag and subtitle: ' + card.textContent);
 });
 
+// 30 turns on the conversation with one small fork at turn 5: the shared history
+// is turns 1..4, and turns 6..29 are an unbranched run. Long enough that folding
+// it changes how much there is to see.
+const LONG_LINE = [
+  {
+    sessionId: 'session-root',
+    createdAt: 1,
+    current: true,
+    turns: Array.from({ length: 30 }, (_, i) => ({ turn: i + 1, text: 'root ' + (i + 1), time: i + 1 })),
+  },
+  {
+    sessionId: 'session-short-fork',
+    parentSessionId: 'session-root',
+    createdAt: 2,
+    forkTurn: 5,
+    turns: [1, 2, 3, 4, 5, 6, 7].map((turn) => ({ turn, text: 'fork ' + turn, time: turn })),
+  },
+];
+
+test('folding and unfolding reframes the canvas', async (t) => {
+  // One click can hide or reveal dozens of turns; without a re-fit the tree walks
+  // off the canvas and the reader has to hunt for it with ⌖.
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, LONG_LINE);
+  const scale = () => {
+    const world = view.dom.window.document.querySelector('.mtx-world');
+    const m = world && /scale\(([\d.]+)\)/.exec(world.style.transform);
+    return m ? Number(m[1]) : null;
+  };
+
+  const foldedScale = scale();
+  assert.ok(foldedScale > 0, 'the folded tree is framed: ' + foldedScale);
+
+  await view.clickCard(view.foldCard().getAttribute('data-id'));
+  const unfoldedScale = scale();
+  assert.ok(unfoldedScale > 0, 'and so is the unfolded one: ' + unfoldedScale);
+  assert.ok(unfoldedScale < foldedScale,
+    'unfolding frames the bigger tree instead of keeping the folded zoom: ' + foldedScale + ' -> ' + unfoldedScale);
+
+  await view.clickTool(2);
+  assert.ok(scale() > unfoldedScale, 'folding again zooms back in: ' + scale());
+});
+
 test('a long run on one branch folds too, not only the shared history', async (t) => {
   // 30 turns on the conversation with one small fork at turn 5: the shared
   // history is turns 1..4, and turns 6..29 are the unbranched run that only this
   // line continues on. Neither of them decides anything, so both fold.
-  const longLine = [
-    {
-      sessionId: 'session-root',
-      createdAt: 1,
-      current: true,
-      turns: Array.from({ length: 30 }, (_, i) => ({ turn: i + 1, text: 'root ' + (i + 1), time: i + 1 })),
-    },
-    {
-      sessionId: 'session-short-fork',
-      parentSessionId: 'session-root',
-      createdAt: 2,
-      forkTurn: 5,
-      turns: [1, 2, 3, 4, 5, 6, 7].map((turn) => ({ turn, text: 'fork ' + turn, time: turn })),
-    },
-  ];
+  const longLine = LONG_LINE;
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, longLine);
   const cards = () => [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold]')];
   const titles = () => cards().map((c) => c.querySelector('.mtx-card-title').textContent);

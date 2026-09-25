@@ -1845,6 +1845,10 @@ return {
 
       const graphRef = React.useRef(null);
       const worldRef = React.useRef(null);
+      // Set when an action is about to change how much tree there is to see (a
+      // fold or an unfold); consumed by the layout effect so the re-fit runs
+      // against the new positions rather than the ones being replaced.
+      const fitAfterLayoutRef = React.useRef(false);
       const cardEls = React.useRef(new Map());
       const edgeEls = React.useRef(new Map());
       const groupNameEls = React.useRef(new Map());
@@ -1908,6 +1912,12 @@ return {
         if (!familyRootId) return;
         if (expanded) foldModes.set(familyRootId, 'expanded');
         else foldModes.delete(familyRootId);
+        // Folding or unfolding can change the canvas by a factor of several — a
+        // single click can hide or reveal a hundred turns — so the view is framed
+        // again once the new layout lands, instead of leaving the reader to pan
+        // back to the tree by hand. The flag is read by the layout effect below:
+        // the fit has to happen after the new positions exist, not before.
+        fitAfterLayoutRef.current = true;
         bumpFold();
       }
 
@@ -2077,6 +2087,12 @@ return {
         springs.current.forEach(function (_, id) { if (!alive.has(id)) springs.current.delete(id); });
         if (!fittedRef.current && lay.pos.size > 0) {
           fittedRef.current = true;
+          fitView();
+        } else if (fitAfterLayoutRef.current) {
+          // A fold or unfold just changed how much tree there is: frame it, the
+          // way the toolbar's ⌖ does, so the tree stays where the reader is
+          // looking instead of sliding off the canvas.
+          fitAfterLayoutRef.current = false;
           fitView();
         }
         applyView();

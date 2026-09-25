@@ -115,6 +115,11 @@ hidden inside a fold.
   accent and the rest stay neutral.
 - Folding is a client-side view decision, not a data change: `buildTurnTree` still returns
   the full tree, and `foldLongRuns(nodes, threshold)` is applied on top of it.
+- Expanding or collapsing re-frames the canvas once. The request is a ref
+  (`fitAfterLayoutRef`), set by the fold action and consumed by the layout effect **after** the
+  new positions exist — fitting at click time would frame the layout being replaced. On a real
+  family the difference is not subtle: one click took its tree from 40 cards at scale 0.46 to
+  757 cards at scale 0.03.
 
 ### 2.7 Version Switch = Main-Chat Swap (`swapOnVersionSwitch`)
 *Location: [`plugin.client.js`](../plugin.client.js)*

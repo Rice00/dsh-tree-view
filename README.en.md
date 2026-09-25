@@ -33,7 +33,7 @@ Switch the conversation panel to Tree and the whole family is drawn on one canva
 | 🖱️ **Jump to a branch** | Every node is a real session version; clicking it moves you onto that line. Underneath it is only an archived flag being flipped: the version you clicked is unarchived back into the sidebar, and the one you were reading is archived into the tree — so moving around the tree moves the sidebar slot rather than adding to it. |
 | 🔀 **Parallel lines** | A version *is* a session. Right-click and send several of them "back into the main chat" — that step only unarchives, it touches nothing else — and two branches can work at the same time without disturbing each other; collect them again when you are done. |
 | 🧹 **One-click collect** | The panel toolbar's "collect every other branch" gathers the family's strays into the tree at once, leaving the one you are using. If any of them is still generating a reply it asks first — stop and collect, or cancel — so nothing is killed quietly. |
-| 🗂️ **Folding** | A run of turns with no fork in it — the opening every version shares included — folds into a single node once it reaches the configured length; click to unfold. The threshold is chosen in Settings and the toolbar folds it back at any time. |
+| 🗂️ **Folding** | A run of turns with no fork in it — the opening every version shares included — folds into a single node once it reaches the configured length; click to unfold. The threshold is chosen in Settings, the toolbar folds it back at any time, and the view re-frames itself after either. |
 | 🚫 **Hiding empty forks** | Forks that only copied this conversation without adding a turn of their own are not drawn; the toolbar carries the same switch. |
 | ✏️ **Renaming branches** | Right-click a node to name a branch. The sidebar title stays the host's own (`(1)`, `(2)` and all) — only the box drawn in the tree is named. |
 | 🔄 **Version ring** | The `‹ n/m ›` ring under a message, to move between versions of the same question without leaving the chat. |
@@ -118,7 +118,7 @@ They are in the Tree tab; right-click and choose "back into the main chat" to re
 Yes. Every version is an independent session — put each one back into the main chat and they run in parallel; collect them into the tree again when you are done.
 
 **What about very large families?**
-Folding exists for that: the threshold can be set to Never, and any run can be folded or unfolded by hand.
+Folding exists for that: the threshold can be set to Never, and any run can be folded or unfolded by hand. Either way the view re-frames itself once — a single click can add or remove hundreds of cards, and hunting for the tree with ⌖ is not the reader's job.
 
 **Do conversations branched with DSH's own button show up in the tree?**
 Yes. They are history-seeded sessions too, so the plugin derives the fork point from the seed length and draws them as a version on that line. DSH itself limits that button to the last message of a completed turn; the plugin does not change that.
