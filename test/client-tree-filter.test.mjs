@@ -472,6 +472,39 @@ test('folding and unfolding reframes the canvas', async (t) => {
   assert.ok(scale() > unfoldedScale, 'folding again zooms back in: ' + scale());
 });
 
+test('a coincidental repeat does not drag a fork down the parent line', async (t) => {
+  // Reported: the branch named "readme" was attached after the current session
+  // instead of at its fork point. Real cause: the shared-turn check kept the LAST
+  // prompt that matched, and the same "1" had been sent on both sides at turn 42 —
+  // so the branch was hung from turn 42, not from the turn 38 it left.
+  const versions = [
+    {
+      sessionId: 'session-root',
+      createdAt: 1,
+      current: true,
+      turns: [1, 2, 3, 4, 5, 6].map((n) => ({ turn: n, text: n <= 4 ? 'shared ' + n : 'root ' + n, time: n })),
+    },
+    {
+      sessionId: 'session-fork',
+      parentSessionId: 'session-root',
+      createdAt: 2,
+      forkTurn: 4,
+      turns: [
+        ...[1, 2, 3, 4].map((n) => ({ turn: n, text: 'shared ' + n, time: n })),
+        { turn: 5, text: 'fork five', time: 5 },
+        { turn: 6, text: 'root 6', time: 6 },
+      ],
+    },
+  ];
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, versions);
+  const byId = new Map(view.links().map((l) => [l.id, l]));
+
+  assert.equal((byId.get('session-fork#t5') || {}).parent, 'session-root#t4',
+    'the fork hangs off the turn it left from: ' + JSON.stringify(view.links().map((l) => l.id + '<' + l.parent)));
+  assert.equal((byId.get('session-fork#t6') || {}).parent, 'session-fork#t5',
+    'and its own later turn keeps following it, even though its text repeats the parent\'s');
+});
+
 test('a long run on one branch folds too, not only the shared history', async (t) => {
   // 30 turns on the conversation with one small fork at turn 5: the shared
   // history is turns 1..4, and turns 6..29 are the unbranched run that only this

@@ -708,6 +708,12 @@ function buildTurnTree(versions, currentSessionId, options) {
     // canvas while the two are one node in the conversation's history. Skip
     // them, and hang the fork's first genuinely new turn off the parent's copy
     // of the last shared turn.
+    //
+    // The shared stretch is a PREFIX, so the walk stops at the first prompt that
+    // differs. It used to compare every turn and keep the last match, and a
+    // coincidence was enough to move a whole branch: a fork of this conversation
+    // had "1" sent on both sides at turn 42, which pulled the branch from its fork
+    // point (turn 38) down to the end of the current line.
     let sharedThrough = null;
     let ownTurns;
     if (v.parentSessionId === undefined) {
@@ -717,13 +723,20 @@ function buildTurnTree(versions, currentSessionId, options) {
       const parentVersion = byId.get(v.parentSessionId);
       const parentText = new Map();
       for (const turn of (parentVersion && parentVersion.turns) || []) parentText.set(turn.turn, turn.text || '');
-      ownTurns = turns.filter(function (t) { return t.turn >= from; }).filter(function (t) {
-        if (!isFork) return true;
-        const parent = parentText.get(t.turn);
-        if (parent === undefined || parent !== (t.text || '')) return true;
-        sharedThrough = t.turn;
-        return false;
-      });
+      const candidates = turns.filter(function (t) { return t.turn >= from; });
+      if (!isFork) {
+        ownTurns = candidates;
+      } else {
+        let at = 0;
+        while (at < candidates.length) {
+          const turn = candidates[at];
+          const parent = parentText.get(turn.turn);
+          if (parent === undefined || parent !== (turn.text || '')) break;
+          sharedThrough = turn.turn;
+          at += 1;
+        }
+        ownTurns = candidates.slice(at);
+      }
     }
     const attachTurn = sharedThrough !== null
       ? sharedThrough
