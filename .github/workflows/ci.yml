@@ -40,13 +40,17 @@ jobs:
         run: git diff --exit-code
 
   official-host:
-    name: DSH 0.1.5-rc.2 / ${{ matrix.os }}
+    name: DSH ${{ matrix.dsh }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        # Every host line the plugin claims to support is acceptance-tested, so a
+        # host that moves an API it depends on shows up here rather than in a
+        # user's panel. 0.1.7 moved session navigation off the session service.
+        dsh: ['0.1.5-rc.2', '0.1.7-rc.1']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -60,7 +64,7 @@ jobs:
       # @deepseek-ai/cordis@4.0.2 against cordis-plugin-include's ~4.0.4 is an ERESOLVE. The
       # fixture resolves them through the tree the host itself uses instead.
       - name: Install published official runtime
-        run: npm install --prefix "${{ runner.temp }}/dsh-runtime" --no-audit --no-fund @deepseek-ai/dsh@0.1.5-rc.2
+        run: npm install --prefix "${{ runner.temp }}/dsh-runtime" --no-audit --no-fund @deepseek-ai/dsh@${{ matrix.dsh }}
       - name: Verify real edits and restart persistence with an offline model
         run: node scripts/run-dsh-acceptance.mjs
         env:

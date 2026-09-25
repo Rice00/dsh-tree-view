@@ -1,6 +1,6 @@
 {
   "name": "dsh-tree-view",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Tree-view conversation branching for DeepSeek Harness: keep one entry in the sidebar, branch and switch versions inside a tree, promote a branch to a formal session, and rename branches. A fork of dsh-plugin-message-edit (MIT).",
   "type": "module",
   "main": "lib/index.js",
@@ -72,6 +72,6 @@
   },
   "engines": {
     "node": ">=22.19.0",
-    "dsh": ">=0.1.5-rc.2 <0.1.6-0"
+    "dsh": ">=0.1.5-rc.2 <0.2.0-0"
   }
 }

@@ -159,10 +159,26 @@ What that means for the next change:
 The host is deliberately outside that promise. `engines.dsh` names a range that
 has been verified, never one that merely looks compatible, so npm cannot hand an
 unverified host to a user as a supported environment. CI's `official-host` job
-runs the acceptance against the published host (currently
-`@deepseek-ai/dsh@0.1.5-rc.2`, installed in the workflow). When a new host line
-ships, add it to that job first, watch it pass, and only then widen the upper
-bound here and in `package.json`.
+runs the acceptance against every host line in that range (`0.1.5-rc.2` and
+`0.1.7-rc.1` at the time of writing; the matrix is in the workflow). When a new
+host line ships, add it to that matrix first, watch it pass, and only then change
+the range here and in `package.json`.
+
+Two rules keep a host change from taking the plugin offline:
+
+- **The client declares one hard dependency: `slots`.** Everything else — the
+  session list, the locale pack, session navigation — is taken with
+  `ctx.inject([...])` or looked up lazily through `ctx.get(name)`. A hard `inject`
+  on a service the host renamed leaves the plugin parked, and DSH Desktop
+  deselects a client plugin whose boot never finishes. That is exactly what
+  happened on 0.1.7: it moved "show this session" from `sessions.open` to
+  `uiWorkspace.openSession`, an old client threw during `apply`, and the plugin
+  disappeared from the app. `sessionNavigator` in `plugin.client.js` now knows
+  both generations.
+- **Host coupling lives in adapters.** `lib/archive-adapter.js` probes
+  capabilities instead of version-gating, and the client reads the subagent
+  catalogue from either generation's field. A moved API should cost one ability,
+  not the plugin.
 
 Release checklist:
 
