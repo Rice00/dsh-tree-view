@@ -21,7 +21,7 @@ try {
   assert.equal(syntax.status, 0, syntax.error?.message || syntax.stderr);
   const required = new Set([
     pkg.main, 'lib/client.js', 'lib/tree-logic.js', 'lib/session-record.js', 'plugin.client.js',
-    'cordis.patch.yml', 'package.json', 'LICENSE',
+    'cordis.patch.yml', 'package.json', 'LICENSE', 'NOTICE',
     ...Object.values(pkg.exports).map(entry => typeof entry === 'string' ? entry : entry.default),
   ]);
   for (const path of required) {

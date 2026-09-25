@@ -18,7 +18,8 @@
     "lib",
     "docs",
     "cordis.patch.yml",
-    "plugin.client.js"
+    "plugin.client.js",
+    "NOTICE"
   ],
   "license": "MIT",
   "repository": {

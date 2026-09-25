@@ -178,6 +178,8 @@ Issue 和 PR 都欢迎。改完先跑 `npm test`。
 
 [MIT](./LICENSE)
 
+本仓库是上游的 fork，上游与更早的 dsh-message-edit 的版权声明及其许可原文保留在 [NOTICE](./NOTICE)。
+
 <div align="center">
 <sub>TreeView —— 以树形视图使用会话</sub>
 

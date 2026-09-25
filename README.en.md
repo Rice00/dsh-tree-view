@@ -177,6 +177,8 @@ Issues and pull requests are welcome. Run `npm test` before opening a PR.
 
 [MIT](./LICENSE)
 
+As a fork, this repository keeps the upstream notices and the license text they came from in [NOTICE](./NOTICE).
+
 <div align="center">
 <sub>TreeView — use a conversation as a tree</sub>
 

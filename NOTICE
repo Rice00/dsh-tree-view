@@ -1,6 +1,26 @@
+dsh-tree-view
+Copyright (c) 2026 Rice00
+
+This repository is a fork of dsh-plugin-message-edit
+(https://github.com/SpookySandwich/dsh-plugin-message-edit), released under the
+MIT License. That project in turn derives part of its host-side branching logic
+from dsh-message-edit (https://github.com/Moeblack/dsh-message-edit), also
+released under the MIT License.
+
+The original notices are retained below, as the MIT License requires. LICENSE
+holds this fork's own copy of the MIT License; this file holds the notices and
+the license text it was forked from.
+
+-------------------------------------------------------------------------------
+dsh-plugin-message-edit — original license text
+-------------------------------------------------------------------------------
+
 MIT License
 
-Copyright (c) 2026 Rice00
+Copyright (c) 2026 SpookySandwich
+
+Portions of the host-side branching logic are derived from dsh-message-edit,
+Copyright (c) Moeblack, also released under the MIT License.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
