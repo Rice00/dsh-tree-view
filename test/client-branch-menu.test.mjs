@@ -76,7 +76,7 @@ async function mountView(t) {
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
     cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
   }, { filename: 'lib/client.js' });
-  plugin.apply({
+  const ctx = {
     get(name) {
       if (name === 'slots') return slots;
       if (name === 'sessions') {
@@ -91,7 +91,11 @@ async function mountView(t) {
       return undefined;
     },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
-  });
+  };
+  // The client takes optional services through `ctx.inject`; the double hands the
+  // same context back, the way Cordis hands back a scope over it.
+  ctx.inject = (deps, callback) => callback(ctx);
+  plugin.apply(ctx);
   assert.equal(typeof view, 'function', 'The Tree view must register');
   await act(async () => { root.render(React.createElement(view, { sessionId: 'session-root' })); });
   await act(async () => { await Promise.resolve(); });

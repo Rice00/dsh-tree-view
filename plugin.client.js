@@ -526,8 +526,45 @@ function collectLeftVersion(sessions, left, target, versions) {
     });
 }
 
+/**
+ * Session navigation, looked up instead of declared.
+ *
+ * "Show this session in the main view" has moved between DSH versions: 0.1.5 and
+ * 0.1.6 keep it on the session controller (`sessions.open`), and 0.1.7 moved it
+ * to the workspace service (`uiWorkspace.openSession`). Declaring either as a
+ * hard `inject` is what breaks the other — a service the host never provides
+ * leaves the plugin parked forever, and DSH Desktop deselects a client plugin
+ * whose boot does not finish. So both are looked up lazily, at click time, and a
+ * host that offers neither leaves the tree readable instead of refusing to boot.
+ */
+function sessionNavigator(ctx) {
+  function service(name) {
+    return ctx && typeof ctx.get === 'function' ? ctx.get(name) : undefined;
+  }
+  return {
+    list: function () {
+      const sessions = service('sessions');
+      return sessions && sessions.list;
+    },
+    open: function (sessionId) {
+      const workspace = service('uiWorkspace');
+      if (workspace && typeof workspace.openSession === 'function') {
+        workspace.openSession(sessionId);
+        return true;
+      }
+      const sessions = service('sessions');
+      if (sessions && typeof sessions.open === 'function') {
+        sessions.open(sessionId);
+        return true;
+      }
+      console.warn('[dsh-tree-view] This DSH build exposes no session navigation service; the tree stays readable, switching versions does not.');
+      return false;
+    },
+  };
+}
+
 function openWhenListed(sessions, sessionId) {
-  const list = sessions.list;
+  const list = sessions.list ? sessions.list() : null;
   if (!list || typeof list.getSnapshot !== 'function') { sessions.open(sessionId); return; }
   if (list.getSnapshot().byId[sessionId] !== undefined) { sessions.open(sessionId); return; }
   const stop = list.subscribe(function () {
@@ -1244,9 +1281,12 @@ const CSS = [
 ].join('');
 
 return {
-  // Module dependencies load code; Cordis injection waits for its services.
-  // The session controller becomes ready asynchronously after connection.
-  inject: ['slots', 'sessions', 'locale'],
+  // Only `slots` is essential: without it there is nothing to register into.
+  // Everything else is taken optionally, in `apply`, because a hard `inject` on a
+  // service the host renamed or dropped parks the plugin forever — and a client
+  // plugin whose boot never finishes is one DSH Desktop deselects outright (which
+  // is what 0.1.7 did to this one: it had moved `open` off the session service).
+  inject: ['slots'],
   apply(ctx) {
     const slots = ctx.get('slots');
     if (slots === undefined) {
@@ -1256,15 +1296,20 @@ return {
     // Reflect the chosen edit style onto <html> now and on every change.
     ctx.effect(function () { syncStyleAttribute(); return styleStore.subscribe(syncStyleAttribute); });
 
-    const sessions = ctx.get('sessions');
-    if (!sessions || typeof sessions.open !== 'function') {
-      throw new Error('[dsh-tree-view] Missing DSH session navigation service. Check client dependencies and restart DSH.');
-    }
+    // Navigation is version-shaped and looked up lazily (see sessionNavigator);
+    // refusing to boot here is what got this plugin deselected on 0.1.7.
+    const sessions = sessionNavigator(ctx);
 
-    ctx.effect(function () {
-      if (sessions && sessions.list && typeof sessions.list.subscribe === 'function') {
-        return sessions.list.subscribe(function () { treeStore.invalidate(); });
-      }
+    // The list feeds the version ring and the subagent catalogue, so it is worth
+    // subscribing to when it exists — but it is not worth refusing to boot over.
+    // `ctx.inject` is the sanctioned optional form: the callback runs whenever the
+    // service turns up, and never blocks the plugin itself.
+    ctx.inject(['sessions'], function (scope) {
+      scope.effect(function () {
+        const list = scope.get('sessions') && scope.get('sessions').list;
+        if (!list || typeof list.subscribe !== 'function') return undefined;
+        return list.subscribe(function () { treeStore.invalidate(); });
+      });
     });
 
     // Session-list state straight from the service, so this works no matter
@@ -1272,32 +1317,44 @@ return {
     function useSessionList() {
       const [, force] = React.useReducer(function (x) { return x + 1; }, 0);
       React.useEffect(function () {
-        if (!sessions || !sessions.list || typeof sessions.list.subscribe !== 'function') return undefined;
-        return sessions.list.subscribe(force);
+        const list = sessions.list();
+        if (!list || typeof list.subscribe !== 'function') return undefined;
+        return list.subscribe(force);
       }, []);
-      return sessions && sessions.list && typeof sessions.list.getSnapshot === 'function'
-        ? sessions.list.getSnapshot()
-        : { byId: {} };
+      const list = sessions.list();
+      return list && typeof list.getSnapshot === 'function' ? list.getSnapshot() : { byId: {} };
     }
 
     /**
      * The subagent sessions the app knows about, as a set of ids.
      *
-     * DSH keeps a catalogue of subagents per parent session, and the list snapshot
-     * carries it (`subagentsByParent`). Every entry that is a `child` names the
-     * session it belongs to. This is the same fact the host payload reports as
-     * `subagent: true`; having both means the marking works with an old host half
-     * (which only lands after a DSH restart) and with a new one.
+     * DSH keeps a catalogue of subagents per parent session, and where it hands it
+     * to the client has moved: 0.1.5/0.1.6 publish `subagentsByParent` on the list
+     * snapshot, 0.1.7 keeps it in `projectionsBySession[parentId].values.subagentCatalog`.
+     * Both are read here, and both are the same fact the host payload reports as
+     * `subagent: true` — having three sources means the marking survives a host
+     * that moved, a host half that has not been restarted, and a host that has none.
      */
     function useSubagentIds() {
       const list = useSessionList();
-      const catalogue = list && list.subagentsByParent;
       const ids = new Set();
+      const catalogue = list && list.subagentsByParent;
       if (catalogue && typeof catalogue === 'object') {
         for (const group of Object.values(catalogue)) {
           const entries = group && Array.isArray(group.entries) ? group.entries : [];
           for (const entry of entries) {
             if (entry && entry.kind === 'child' && typeof entry.id === 'string') ids.add(entry.id);
+          }
+        }
+      }
+      const projections = list && list.projectionsBySession;
+      if (projections && typeof projections === 'object') {
+        for (const projection of Object.values(projections)) {
+          const values = projection && projection.values;
+          const catalog = values && values.subagentCatalog;
+          if (!Array.isArray(catalog)) continue;
+          for (const entry of catalog) {
+            if (entry && typeof entry.id === 'string') ids.add(entry.id);
           }
         }
       }
@@ -1452,15 +1509,19 @@ return {
       if (params) for (const k in params) out = out.replace('{' + k + '}', String(params[k]));
       return out;
     };
-    try {
-      const locale = ctx.get('locale');
-      if (locale && typeof locale.register === 'function' && typeof locale.bind === 'function') {
-        ctx.effect(function () { return locale.register(I18N_NS, I18N); });
+    // Locale is a nicety: until it arrives the panel uses the English dictionary
+    // below. Taken optionally, like the session service, so that no service this
+    // plugin can live without is able to hold its boot open.
+    ctx.inject(['locale'], function (scope) {
+      try {
+        const locale = scope.get('locale');
+        if (!locale || typeof locale.register !== 'function' || typeof locale.bind !== 'function') return;
+        scope.effect(function () { return locale.register(I18N_NS, I18N); });
         t = locale.bind(I18N_NS);
+      } catch (e) {
+        console.warn('[dsh-tree-view] Failed to register translations; using English.', e);
       }
-    } catch (e) {
-      console.warn('[dsh-tree-view] Failed to register translations; using English.', e);
-    }
+    });
 
     /**
      * Two branches off one stem — the second one dashed while empty forks are
@@ -1652,8 +1713,9 @@ return {
         // has to appear would leave `openWhenListed` holding a subscription,
         // and that subscription fires on the next session-list change — which
         // is how a restore used to land minutes late, in the middle of typing.
-        const byId = sessions && sessions.list && typeof sessions.list.getSnapshot === 'function'
-          ? sessions.list.getSnapshot().byId
+        const list = sessions.list();
+        const byId = list && typeof list.getSnapshot === 'function'
+          ? list.getSnapshot().byId
           : null;
         if (!byId || byId[target.sessionId] === undefined) {
           restoredFamilies.add(root);

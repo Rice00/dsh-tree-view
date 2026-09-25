@@ -54,14 +54,17 @@ async function mountSettings(t) {
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
     cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
   }, { filename: 'lib/client.js' });
-  plugin.apply({
+  const ctx = {
     get(name) {
       if (name === 'slots') return slots;
       if (name === 'sessions') return { open() {}, list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: {} }) } };
       return undefined;
     },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
-  });
+  };
+  // Optional services ride on `ctx.inject`; the double hands back the same context.
+  ctx.inject = (deps, callback) => callback(ctx);
+  plugin.apply(ctx);
   assert.ok(component, 'the settings section must register');
   await act(async () => { root.render(React.createElement(component)); });
 

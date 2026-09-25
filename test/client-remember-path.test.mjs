@@ -132,14 +132,17 @@ async function mountChat(t, options = {}) {
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
     cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
   }, { filename: 'lib/client.js' });
-  plugin.apply({
+  const ctx = {
     get(name) {
       if (name === 'slots') return slots;
       if (name === 'sessions') return { open: (sessionId) => { opened.push(sessionId); }, list };
       return undefined;
     },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
-  });
+  };
+  // Optional services ride on `ctx.inject`; the double hands back the same context.
+  ctx.inject = (deps, callback) => callback(ctx);
+  plugin.apply(ctx);
   assert.equal(typeof nodeView, 'function', 'the user bubble must be registered');
 
   // The host re-renders the bubble with the session it belongs to; the plugin

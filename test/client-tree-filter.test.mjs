@@ -21,7 +21,7 @@ const VERSIONS = [
   { sessionId: 'session-fork', parentSessionId: 'session-root', createdAt: 3, forkTurn: 15, turns: FORK_TURNS },
 ];
 
-async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId = 'session-root', catalogue = {}) {
+async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId = 'session-root', catalogue = {}, host = 'legacy') {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
     url: 'https://tree-view.test/',
     pretendToBeVisual: true,
@@ -47,6 +47,9 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   const root = createRoot(dom.window.document.getElementById('root'));
   const disposers = [];
   const opened = [];
+  // 0.1.7 opens a session through the workspace service instead; a test that
+  // asks for that host shape records here.
+  const workspaceOpened = [];
   const tabClicks = [];
   t.after(async () => {
     await act(async () => root.unmount());
@@ -70,12 +73,17 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
     cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
   }, { filename: 'lib/client.js' });
-  plugin.apply({
+  const ctx = {
     get(name) {
       if (name === 'slots') return slots;
+      if (name === 'uiWorkspace' && host === 'modern') {
+        return { openSession: (id) => { workspaceOpened.push(id); } };
+      }
       if (name === 'sessions') {
         return {
-          open: (id) => { opened.push(id); },
+          // 0.1.7 dropped `open` from the session controller; `bare` is a host
+          // that offers neither navigation route.
+          ...(host === 'legacy' ? { open: (id) => { opened.push(id); } } : {}),
           list: {
             subscribe: () => () => {},
             getSnapshot: () => ({
@@ -90,7 +98,10 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
       return undefined;
     },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
-  });
+  };
+  // Optional services ride on `ctx.inject`; the double hands back the same context.
+  ctx.inject = (deps, callback) => callback(ctx);
+  plugin.apply(ctx);
   assert.equal(typeof view, 'function');
   // The conversation area always has a Chat tab first; showChat() brings it
   // forward, and these tests watch that click land.
@@ -146,7 +157,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   return {
     dom, cardIds, offsets, titles, links, tools, clickTool, clickCard, foldCard,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
-    opened, tabClicks,
+    opened, workspaceOpened, tabClicks,
   };
 }
 
@@ -616,4 +627,23 @@ test('a family with nothing worth folding keeps the control out of the way', asy
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, flat, undefined, 'session-only');
   assert.equal(view.foldCard(), null, 'nothing is folded');
   assert.equal(view.tools()[2].disabled, true, 'and the fold control says it has nothing to do');
+});
+
+test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions.open', async (t) => {
+  // 0.1.7 moved "show this session in the main view" off the session controller
+  // and onto the workspace service. The client used to require `sessions.open`
+  // and throw without it, and DSH Desktop deselects a plugin whose client half
+  // fails to boot — that is how the whole plugin went missing on 0.1.7.
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root', {}, 'modern');
+  await view.clickCard('session-fork#t16');
+  assert.deepEqual(view.workspaceOpened, ['session-fork'], 'the workspace service opens the version');
+  assert.deepEqual(view.opened, [], 'the removed sessions.open is never called');
+});
+
+test('a host with no navigation service still boots, read-only, instead of failing', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root', {}, 'bare');
+  assert.ok(view.cardIds().length > 0, 'the tree is still drawn');
+  await view.clickCard('session-fork#t16');
+  assert.deepEqual(view.opened, []);
+  assert.deepEqual(view.workspaceOpened, []);
 });

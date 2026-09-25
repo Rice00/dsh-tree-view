@@ -63,14 +63,18 @@ async function mount(t, content, renderMessageImages, options = {}) {
     window: dom.window, document: dom.window.document, console,
     setTimeout, clearTimeout,
   }, { filename: 'lib/client.js' });
-  plugin.apply({
+  const ctx = {
     get(name) { return name === 'slots' ? slots : name === 'sessions' ? {
       open: options.open ?? (() => {}),
       list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: Object.fromEntries(
         ['session-test', ...(options.versions ?? []).map(version => version.sessionId)].map(id => [id, { id }])) }) },
     } : undefined; },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
-  });
+  };
+  // `ctx.inject` is how the client takes an optional service; the double hands the
+  // same context back, the way Cordis hands back a scope over it.
+  ctx.inject = (deps, callback) => callback(ctx);
+  plugin.apply(ctx);
   assert.equal(typeof component, 'function', 'The user-message slot must register');
   const props = {
     sessionId: 'session-test',

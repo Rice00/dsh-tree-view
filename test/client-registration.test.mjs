@@ -17,6 +17,15 @@ function load() {
   return { plugin, warnings };
 }
 
+// A context double with the two verbs the client uses: `get` for lookups and
+// `inject` for optional services (Cordis hands the callback a scope over the
+// same context, so the double hands back itself).
+function ctxDouble({ get, effect = fn => fn() }) {
+  const ctx = { get, effect };
+  ctx.inject = (_deps, callback) => { callback(ctx); return () => {}; };
+  return ctx;
+}
+
 test('declared client dependencies make the UI services available for registration', () => {
   const { plugin } = load();
   const registered = [];
@@ -26,20 +35,24 @@ test('declared client dependencies make the UI services available for registrati
     inject: (_name, register) => register(),
     register: spec => { registered.push(spec.name); return () => {}; },
   };
-  plugin.apply({
+  plugin.apply(ctxDouble({
     get: name => name === 'slots' && pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-renderer') ? slots
       : name === 'sessions' && pkg.dsh.client.inject.includes('@deepseek-ai/dsh-api-session-controller') ? { open() {} } : undefined,
-    effect: fn => fn(),
-  });
+  }));
   assert.deepEqual(registered, ['settings.section', 'conversation.chat.node', 'conversation.view']);
 });
 
 test('a missing slots service fails visibly instead of silently disabling the module', () => {
   const { plugin } = load();
-  assert.throws(() => plugin.apply({ get: () => undefined }), /Missing DSH slots service.*inject/);
+  assert.throws(() => plugin.apply(ctxDouble({ get: () => undefined })), /Missing DSH slots service.*inject/);
 });
 
-test('Cordis waits for the asynchronous session service before applying the client', async t => {
+test('the client applies without the session service, and takes it when it arrives', async t => {
+  // 0.1.7 moved `open` off the session service, and a host in between could move
+  // the service itself. Declaring it as a hard `inject` parked the plugin until
+  // the service appeared — forever, if the host had renamed it — and DSH Desktop
+  // deselects a client plugin whose boot never finishes. So `slots` alone decides
+  // whether the client runs, and `sessions` is taken through `ctx.inject`.
   const { plugin } = load();
   const ctx = new Context();
   t.after(() => ctx.fiber.dispose());
@@ -48,13 +61,14 @@ test('Cordis waits for the asynchronous session service before applying the clie
     inject: (_name, register) => register(),
     register: spec => { registered.push(spec.name); return () => {}; },
   });
-  ctx.provide('locale', {});
   const fiber = ctx.plugin(plugin);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(fiber.state, 0, 'Client remains pending until the session controller is ready');
-  assert.deepEqual(registered, []);
-  ctx.provide('sessions', { open() {} });
   await fiber;
+  assert.equal(fiber.state, 2, 'the client applies as soon as its essential service is there');
+  assert.deepEqual(registered, ['settings.section', 'conversation.chat.node', 'conversation.view']);
+
+  // The optional service lands later; nothing about the applied plugin breaks.
+  ctx.provide('sessions', { list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: {} }) } });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(fiber.state, 2);
   assert.deepEqual(registered, ['settings.section', 'conversation.chat.node', 'conversation.view']);
 });
@@ -62,7 +76,7 @@ test('Cordis waits for the asynchronous session service before applying the clie
 test('a user-renderer collision is reported while the other UI entries still register', () => {
   const { plugin, warnings } = load();
   const registered = [];
-  plugin.apply({
+  plugin.apply(ctxDouble({
     get: name => name === 'slots' ? {
       inject: (_name, register) => register(),
       register(spec) {
@@ -71,8 +85,7 @@ test('a user-renderer collision is reported while the other UI entries still reg
         return () => {};
       },
     } : name === 'sessions' ? { open() {} } : undefined,
-    effect: fn => fn(),
-  });
+  }));
   assert.deepEqual(registered, ['settings.section', 'conversation.view']);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0][0], /editing is unavailable/);
