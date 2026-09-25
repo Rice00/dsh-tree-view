@@ -577,19 +577,47 @@ function sessionNavigator(ctx) {
       const sessions = service('sessions');
       return sessions && sessions.list;
     },
+    /**
+     * Show a session, retrying while the client's session manager catches up.
+     *
+     * 0.1.7's `uiWorkspace.openSession` throws when the manager does not know the
+     * target yet: `resolveTarget` refuses an id that is neither loaded nor in the
+     * catalogue. That is precisely the state a version comes out of the tree in —
+     * it was archived, the host has just unarchived it, and the client catalogue is
+     * still a step behind — and the throw used to escape silently, so the click did
+     * nothing at all and the reader stayed on the session they were on. Retrying is
+     * the whole fix; giving up loudly is the floor.
+     */
     open: function (sessionId) {
-      const workspace = service('uiWorkspace');
-      if (workspace && typeof workspace.openSession === 'function') {
-        workspace.openSession(sessionId);
-        return true;
-      }
-      const sessions = service('sessions');
-      if (sessions && typeof sessions.open === 'function') {
-        sessions.open(sessionId);
-        return true;
-      }
-      console.warn('[dsh-tree-view] This DSH build exposes no session navigation service; the tree stays readable, switching versions does not.');
-      return false;
+      const attempt = function (left) {
+        const workspace = service('uiWorkspace');
+        if (workspace && typeof workspace.openSession === 'function') {
+          try {
+            workspace.openSession(sessionId);
+            return true;
+          } catch (e) {
+            if (left > 0) { setTimeout(function () { attempt(left - 1); }, 150); return false; }
+            console.warn('[dsh-tree-view] could not open ' + sessionId + ': ' + (e && e.message ? e.message : e));
+            return false;
+          }
+        }
+        const sessions = service('sessions');
+        if (sessions && typeof sessions.open === 'function') {
+          try {
+            sessions.open(sessionId);
+            return true;
+          } catch (e) {
+            if (left > 0) { setTimeout(function () { attempt(left - 1); }, 150); return false; }
+            console.warn('[dsh-tree-view] could not open ' + sessionId + ': ' + (e && e.message ? e.message : e));
+            return false;
+          }
+        }
+        console.warn('[dsh-tree-view] This DSH build exposes no session navigation service; the tree stays readable, switching versions does not.');
+        return false;
+      };
+      // 20 tries over three seconds: long enough for an unarchive to reach the
+      // catalogue, short enough that a real refusal is reported rather than hidden.
+      return attempt(20);
     },
   };
 }

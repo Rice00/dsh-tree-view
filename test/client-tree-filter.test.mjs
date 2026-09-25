@@ -54,6 +54,8 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   // it — the signal `collectAfterSwitch` waits for.
   const retained = {};
   const listSubscribers = [];
+  // Attempts the flaky workspace double has seen, for the retry test.
+  let workspaceAttempts = 0;
   const tabClicks = [];
   t.after(async () => {
     await act(async () => root.unmount());
@@ -80,8 +82,16 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   const ctx = {
     get(name) {
       if (name === 'slots') return slots;
-      if (name === 'uiWorkspace' && host === 'modern') {
-        return { openSession: (id) => { workspaceOpened.push(id); } };
+      if (name === 'uiWorkspace' && (host === 'modern' || host === 'flaky')) {
+        return {
+          openSession: (id) => {
+            // A target the client catalogue has not caught up with yet: 0.1.7's
+            // `resolveTarget` refuses it, and that refusal is what made a click do
+            // nothing at all.
+            if (host === 'flaky' && workspaceAttempts++ < 2) throw new Error('unknown session ' + id);
+            workspaceOpened.push(id);
+          },
+        };
       }
       if (name === 'sessions') {
         return {
@@ -736,4 +746,21 @@ test('the same press without movement still opens the node', async (t) => {
 
   assert.equal(view.worldTransform(), before, 'nothing was panned');
   assert.ok(view.opened.includes('session-fork'), 'the node was opened');
+});
+
+test('a click retries while the client catalogue catches up, instead of doing nothing', async (t) => {
+  // 0.1.7's `uiWorkspace.openSession` throws for a session the client manager does
+  // not know yet — exactly the state a version comes out of the tree in, since it
+  // was archived until a moment ago. The throw used to escape silently: the click
+  // did nothing and the reader stayed on the session they were leaving, which read
+  // as "it jumped back to the new session".
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root', {}, 'flaky');
+
+  await view.clickCard('session-fork#t16');
+  assert.deepEqual(view.workspaceOpened, [], 'the first two attempts are refused by the manager');
+
+  for (let i = 0; i < 20 && view.workspaceOpened.length === 0; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.deepEqual(view.workspaceOpened, ['session-fork'], 'and the retry lands on the version that was clicked');
 });
