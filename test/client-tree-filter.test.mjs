@@ -50,6 +50,10 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   // 0.1.7 opens a session through the workspace service instead; a test that
   // asks for that host shape records here.
   const workspaceOpened = [];
+  // Sessions the main view is retaining, and the list subscribers that hear about
+  // it — the signal `collectAfterSwitch` waits for.
+  const retained = {};
+  const listSubscribers = [];
   const tabClicks = [];
   t.after(async () => {
     await act(async () => root.unmount());
@@ -85,9 +89,16 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
           // that offers neither navigation route.
           ...(host === 'legacy' ? { open: (id) => { opened.push(id); } } : {}),
           list: {
-            subscribe: () => () => {},
+            subscribe: (fn) => {
+              listSubscribers.push(fn);
+              return () => { const at = listSubscribers.indexOf(fn); if (at !== -1) listSubscribers.splice(at, 1); };
+            },
             getSnapshot: () => ({
-              byId: Object.fromEntries(versions.map((v) => [v.sessionId, { id: v.sessionId }])),
+              // The host marks the sessions the main view is retaining; opening a
+              // session is what puts it in this set, and the deferred collect waits
+              // for exactly that.
+              byId: Object.fromEntries(versions.map((v) => [v.sessionId,
+                Object.assign({ id: v.sessionId }, retained[v.sessionId] ? { retainedBy: [{ kind: 'main' }] } : {})])),
               // DSH keeps a catalogue of subagents per parent session; the tree
               // reads it when the host payload cannot say (an old host half).
               subagentsByParent: catalogue ?? {},
@@ -148,10 +159,13 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     }
     el.dispatchEvent(new dom.window.MouseEvent('pointerup', at(200 + dx, 200 + dy)));
   });
-  // The host hands the view the session it is showing: this is how a switch
-  // lands, and what the deferred collect waits for.
-  const switchTo = async (nextSessionId) => {
-    await act(async () => { root.render(React.createElement(view, { sessionId: nextSessionId })); });
+  // Opening a session makes the main view retain it; the list snapshot says so
+  // (`retainedBy`), and that is the signal the deferred collect waits for. It has
+  // to come from the host rather than from this component's props: the view is
+  // remounted on a switch, so anything kept in a ref dies with it.
+  const retain = async (id) => {
+    retained[id] = true;
+    await act(async () => { for (const fn of [...listSubscribers]) fn(); });
     await act(async () => { await Promise.resolve(); });
   };
   const confirmTitle = () => (dom.window.document.querySelector('.mtx-confirm-title') || {}).textContent ?? null;
@@ -177,7 +191,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   return {
     dom, cardIds, offsets, titles, links, tools, clickTool, clickCard, foldCard,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
-    worldTransform, dragFromCard, switchTo,
+    worldTransform, dragFromCard, retain,
     opened, workspaceOpened, tabClicks,
   };
 }
@@ -586,7 +600,7 @@ function recording(posts, versions) {
   };
 }
 
-test('bringing a collected version back out puts the current one away once the switch lands', async (t) => {
+test('bringing a collected version back out puts the current one away once it is retained', async (t) => {
   const posts = [];
   const versions = withArchived(['session-root']);
   const view = await mountView(t, { dropEmptyForks: true }, versions, recording(posts, versions), 'session-fork');
@@ -600,26 +614,33 @@ test('bringing a collected version back out puts the current one away once the s
   // reader stayed on the session they had just left and a second click looked
   // like it had jumped there.
   assert.ok(!posts.some((p) => p.action === 'demote'),
-    'nothing is archived before the switch has landed: ' + JSON.stringify(posts));
+    'nothing is archived before the app retains the target: ' + JSON.stringify(posts));
 
-  await view.switchTo('session-root');
+  await view.retain('session-root');
   assert.ok(posts.some((p) => p.action === 'demote' && p.sessionId === 'session-fork'),
-    'once the conversation area shows the version you asked for, the one you left goes into the tree');
+    'once the main view retains the version you asked for, the one you left goes into the tree');
   const activateAt = posts.findIndex((p) => p.action === 'activate' && p.sessionId === 'session-root');
   const demoteAt = posts.findIndex((p) => p.action === 'demote');
   assert.ok(activateAt !== -1 && demoteAt > activateAt, 'and it is issued after the target is brought out');
 });
 
-test('a switch that never lands on the target drops the collect', async (t) => {
+test('a host that never reports retention still puts the left version away', async (t) => {
+  // The collect has to happen on every host, including one whose list snapshot
+  // carries no retention field: waiting for a signal that never comes is how the
+  // collect went missing altogether.
   const posts = [];
   const versions = withArchived(['session-root']);
   const view = await mountView(t, { dropEmptyForks: true }, versions, recording(posts, versions), 'session-fork');
 
   await view.clickCard('session-root#root');
-  // The reader ended up somewhere else entirely — a stale intent must not archive
-  // the session they were reading.
-  await view.switchTo('session-other');
-  assert.ok(!posts.some((p) => p.action === 'demote'), 'nothing is archived');
+  assert.ok(!posts.some((p) => p.action === 'demote'), 'not in the click tick');
+
+  // Wait past the bounded fallback (the harness reports no retention).
+  for (let i = 0; i < 30 && !posts.some((p) => p.action === 'demote'); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(posts.some((p) => p.action === 'demote' && p.sessionId === 'session-fork'),
+    'the version you left is collected anyway: ' + JSON.stringify(posts));
 });
 
 test('a version already in the main chat just opens — nothing is put away', async (t) => {

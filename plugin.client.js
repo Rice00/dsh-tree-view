@@ -511,38 +511,50 @@ function collectLeftVersion(sessions, left, target, versions) {
 }
 
 /**
- * Put the version you leave away — but only once the conversation area is really
- * showing the version you asked for.
+ * Put the version you leave away — but only once the app is really showing the
+ * version you asked for.
  *
- * The order is the whole point, and it used to be wrong. The collect was issued in
- * the same tick as the click, so the session on screen was archived while the
- * reveal of the target was still in flight; the workspace then re-revealed what it
- * had been showing (its own fallback) and the reader ended up on the session they
- * had just left. That is what made clicking a second node look like it jumped to
- * the new session instead of the node that was clicked.
+ * The order is the whole point, and issuing the collect in the click's own tick was
+ * wrong: the session on screen was archived while the reveal of the target was
+ * still in flight, the workspace re-revealed its own fallback, and the reader ended
+ * up on the session they had just left. That is what made clicking a second node
+ * look like it jumped to the new session.
  *
- * The `sessionId` the slot hands back is the app's own signal that the switch has
- * landed, so the collect waits for it. If the switch never lands, nothing is
- * collected at all — a version left in the sidebar is a much smaller surprise than
- * an archive issued against the wrong session.
+ * The signal is the host's, not the component's: the session list marks the
+ * sessions the main view is retaining, and opening the target retains it. Watching
+ * that survives the view being remounted on the switch — a pending intent kept in a
+ * React ref died with the old component, which is how the collect went missing
+ * altogether. If retention is never reported (older hosts keep no such field), a
+ * bounded wait collects anyway rather than never.
  */
-function useDeferredCollect(sessions, sessionId) {
-  const pending = React.useRef(null);
-  React.useEffect(function () {
-    const entry = pending.current;
-    if (!entry) return;
-    if (entry.target !== sessionId) {
-      // Landed somewhere else entirely: the intent is stale, drop it.
-      pending.current = null;
-      return;
-    }
-    pending.current = null;
-    collectLeftVersion(entry.sessions, entry.left, entry.target, entry.versions);
-  }, [sessionId]);
-  return function (left, target, versions) {
-    if (!left || left === target) return;
-    pending.current = { sessions: sessions, left: left, target: target, versions: versions };
+function collectAfterSwitch(sessions, left, target, versions) {
+  if (!left || left === target) return;
+  const collect = function () { collectLeftVersion(sessions, left, target, versions); };
+  const retained = function () {
+    const list = sessions && typeof sessions.list === 'function' ? sessions.list() : null;
+    if (!list || typeof list.getSnapshot !== 'function') return true;
+    const snapshot = list.getSnapshot();
+    const entry = snapshot && snapshot.byId ? snapshot.byId[target] : null;
+    return !!(entry && entry.retainedBy);
   };
+  if (retained()) { collect(); return; }
+
+  const list = sessions && typeof sessions.list === 'function' ? sessions.list() : null;
+  let done = false;
+  let stop = function () {};
+  const finish = function () {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    stop();
+    collect();
+  };
+  if (list && typeof list.subscribe === 'function') {
+    stop = list.subscribe(function () { if (retained()) finish(); });
+  }
+  // A host that never reports retention still has to collect: waiting forever is
+  // how the collect went missing in the first place.
+  const timer = setTimeout(finish, 2000);
 }
 
 /**
@@ -1645,14 +1657,13 @@ return {
     /** Ring beneath a bubble: ‹ i/m › switching whole version sessions. */
     function VersionRing(props) {
       const ring = props.ring;
-      const deferCollect = useDeferredCollect(sessions, props.sessionId);
       if (!ring) return null;
       const go = function (delta) {
         const next = ring.alternatives[ring.index + delta];
         if (!next) return;
         // The ring is the same switch, so it follows the same swap rules: the
         // version you leave is collected, but only after the switch has landed.
-        if (next.archived === true) deferCollect(props.sessionId, next.sessionId, props.versions);
+        if (next.archived === true) collectAfterSwitch(sessions, props.sessionId, next.sessionId, props.versions);
         openVersionTarget(sessions, next);
       };
       return React.createElement('div', { className: 'mtx-ring' },
@@ -1953,9 +1964,6 @@ return {
       // part of that seam disables exactly those controls — instead of letting
       // them fail at click time, or hiding a session it could no longer show.
       const archive = (tree && tree.archiveSupport) || { ok: true, read: true, hide: true, show: true, missing: [] };
-      // Putting the version you leave away waits until this view is actually
-      // showing the one you clicked (see useDeferredCollect).
-      const deferCollect = useDeferredCollect(sessions, sessionId);
 
       const graphRef = React.useRef(null);
       const worldRef = React.useRef(null);
@@ -2336,9 +2344,9 @@ return {
         }
         // Anything else is a swap: a version that is collected in the tree comes
         // back out, and the one you were reading goes in — the latter only once the
-        // switch has landed (see useDeferredCollect: collecting first is what made a
-        // second click land on the session you had just left).
-        if (v.archived === true) deferCollect(sessionId, v.sessionId, versions);
+        // app is really showing the target (see collectAfterSwitch: collecting
+        // first is what made a second click land on the session you had just left).
+        if (v.archived === true) collectAfterSwitch(sessions, sessionId, v.sessionId, versions);
         openVersionTarget(sessions, v);
         showChat();
         if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
