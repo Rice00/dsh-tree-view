@@ -1133,11 +1133,11 @@ const CSS = [
   // edges. Cursor communicates state: grab on canvas, pointer on cards.
   '.mtx-graph{position:relative;height:100%;overflow:hidden;cursor:grab;background-image:radial-gradient(color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 22%,transparent) 1px,transparent 1px);background-size:26px 26px;touch-action:none;user-select:none}',
   '.mtx-graph[data-panning]{cursor:grabbing}',
-  '.mtx-world{position:absolute;left:0;top:0;will-change:transform}',
+  '.mtx-world{position:absolute;left:0;top:0}',
   '.mtx-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}',
   '.mtx-edge{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 45%,transparent);stroke-width:1.5}',
   '.mtx-edge[data-path]{stroke:var(--mtx-accent);stroke-width:2}',
-  '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--mtx-surface));box-shadow:0 2px 10px var(--mtx-shadow);cursor:pointer;will-change:transform;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
+  '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--mtx-surface));box-shadow:0 2px 10px var(--mtx-shadow);cursor:pointer;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
   '.mtx-card:hover{box-shadow:0 6px 22px var(--mtx-shadow-strong);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent)}',
   // A card is highlighted when it is on the line you are reading: the turns you
   // are adding and the shared history above the fork are the same line, so both
@@ -1892,6 +1892,9 @@ return {
       const dragRef = React.useRef(null);
       const rafRef = React.useRef(0);
       const fittedRef = React.useRef(false);
+      // While the canvas is moving the world is one GPU layer (smooth pan/zoom);
+      // this timer is what takes the hint back off once the gesture settles.
+      const promoteTimerRef = React.useRef(0);
 
       const fullNodes = React.useMemo(function () {
         return buildTurnTree(versions, sessionId, { dropEmptyForks: prefs.dropEmptyForks, subagentIds: subagentIds });
@@ -1979,10 +1982,25 @@ return {
         return boxes;
       })();
 
+      // Panning and zooming set a transform on the world; leaving that layer
+      // promoted for good would keep the raster drawn for the old scale and let
+      // the GPU stretch it, which is exactly what makes zoomed-in text blurry.
+      // So the hint is raised for the duration of the movement only, and dropped
+      // once it settles: taking it off forces a repaint at the scale actually on
+      // screen, so the tree is redrawn sharp instead of scaled up soft.
       function applyView() {
         const el = worldRef.current;
         const view = viewRef.current;
-        if (el) el.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.scale + ')';
+        if (el) {
+          el.style.willChange = 'transform';
+          if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
+          promoteTimerRef.current = setTimeout(function () {
+            promoteTimerRef.current = 0;
+            const node = worldRef.current;
+            if (node) node.style.willChange = '';
+          }, 160);
+          el.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.scale + ')';
+        }
         positionGroupNames();
       }
 
