@@ -134,6 +134,26 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     el.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, cancelable: true, button: 0 }));
   });
   const foldCard = () => dom.window.document.querySelector('.mtx-card[data-fold]');
+  // The world transform is how the canvas reports where it has been panned to.
+  const worldTransform = () => (dom.window.document.querySelector('.mtx-world') || {}).style?.transform ?? null;
+  // A press that moves: the same pointerdown as a click, then pointermoves past
+  // the drag threshold, then release.
+  const dragFromCard = (id, dx, dy) => act(async () => {
+    const el = dom.window.document.querySelector('.mtx-card[data-id="' + id + '"]');
+    assert.ok(el, 'card ' + id + ' is drawn');
+    const at = (x, y) => ({ bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    el.dispatchEvent(new dom.window.MouseEvent('pointerdown', at(200, 200)));
+    for (let i = 1; i <= 4; i++) {
+      el.dispatchEvent(new dom.window.MouseEvent('pointermove', at(200 + (dx * i) / 4, 200 + (dy * i) / 4)));
+    }
+    el.dispatchEvent(new dom.window.MouseEvent('pointerup', at(200 + dx, 200 + dy)));
+  });
+  // The host hands the view the session it is showing: this is how a switch
+  // lands, and what the deferred collect waits for.
+  const switchTo = async (nextSessionId) => {
+    await act(async () => { root.render(React.createElement(view, { sessionId: nextSessionId })); });
+    await act(async () => { await Promise.resolve(); });
+  };
   const confirmTitle = () => (dom.window.document.querySelector('.mtx-confirm-title') || {}).textContent ?? null;
   const confirmButtons = () => [...dom.window.document.querySelectorAll('.mtx-confirm .mtx-btn')].map((b) => b.textContent);
   const clickConfirm = (label) => act(async () => {
@@ -157,6 +177,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   return {
     dom, cardIds, offsets, titles, links, tools, clickTool, clickCard, foldCard,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
+    worldTransform, dragFromCard, switchTo,
     opened, workspaceOpened, tabClicks,
   };
 }
@@ -565,17 +586,40 @@ function recording(posts, versions) {
   };
 }
 
-test('bringing a collected version back out puts the current one away', async (t) => {
+test('bringing a collected version back out puts the current one away once the switch lands', async (t) => {
   const posts = [];
   const versions = withArchived(['session-root']);
   const view = await mountView(t, { dropEmptyForks: true }, versions, recording(posts, versions), 'session-fork');
 
   await view.clickCard('session-root#root');
-  assert.ok(posts.some((p) => p.action === 'demote' && p.sessionId === 'session-fork'),
-    'the version you were reading goes back into the tree: ' + JSON.stringify(posts));
   assert.ok(posts.some((p) => p.action === 'activate' && p.sessionId === 'session-root'),
-    'and the one you clicked is brought out of it');
-  assert.ok(view.opened.includes('session-root'), 'then it is opened');
+    'the version you clicked is brought out of the tree: ' + JSON.stringify(posts));
+  assert.ok(view.opened.includes('session-root'), 'and it is opened');
+  // The collect must not be issued while the reveal is still in flight: archiving
+  // the session on screen made the workspace re-reveal its own fallback, so the
+  // reader stayed on the session they had just left and a second click looked
+  // like it had jumped there.
+  assert.ok(!posts.some((p) => p.action === 'demote'),
+    'nothing is archived before the switch has landed: ' + JSON.stringify(posts));
+
+  await view.switchTo('session-root');
+  assert.ok(posts.some((p) => p.action === 'demote' && p.sessionId === 'session-fork'),
+    'once the conversation area shows the version you asked for, the one you left goes into the tree');
+  const activateAt = posts.findIndex((p) => p.action === 'activate' && p.sessionId === 'session-root');
+  const demoteAt = posts.findIndex((p) => p.action === 'demote');
+  assert.ok(activateAt !== -1 && demoteAt > activateAt, 'and it is issued after the target is brought out');
+});
+
+test('a switch that never lands on the target drops the collect', async (t) => {
+  const posts = [];
+  const versions = withArchived(['session-root']);
+  const view = await mountView(t, { dropEmptyForks: true }, versions, recording(posts, versions), 'session-fork');
+
+  await view.clickCard('session-root#root');
+  // The reader ended up somewhere else entirely — a stale intent must not archive
+  // the session they were reading.
+  await view.switchTo('session-other');
+  assert.ok(!posts.some((p) => p.action === 'demote'), 'nothing is archived');
 });
 
 test('a version already in the main chat just opens — nothing is put away', async (t) => {
@@ -646,4 +690,29 @@ test('a host with no navigation service still boots, read-only, instead of faili
   await view.clickCard('session-fork#t16');
   assert.deepEqual(view.opened, []);
   assert.deepEqual(view.workspaceOpened, []);
+});
+
+test('a press that lands on a node can still pan the canvas', async (t) => {
+  // Reported: once the pointer went down on a card, the canvas could not be
+  // dragged at all. A card press is both "open this version" and "grab the canvas
+  // here", so the movement decides: under the threshold the release opens the
+  // node, past it the press pans and the release opens nothing.
+  const view = await mountView(t, { dropEmptyForks: true });
+  const before = view.worldTransform();
+
+  await view.dragFromCard('session-root#root', 40, 24);
+
+  assert.notEqual(view.worldTransform(), before, 'the canvas followed the pointer');
+  assert.deepEqual(view.opened, [], 'and a drag does not open the node it started on');
+  assert.deepEqual(view.tabClicks, [], 'nor does it jump back to the Chat tab');
+});
+
+test('the same press without movement still opens the node', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true });
+  const before = view.worldTransform();
+
+  await view.clickCard('session-fork#t16');
+
+  assert.equal(view.worldTransform(), before, 'nothing was panned');
+  assert.ok(view.opened.includes('session-fork'), 'the node was opened');
 });

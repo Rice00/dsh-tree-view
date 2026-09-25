@@ -491,22 +491,6 @@ async function openVersionTarget(sessions, v) {
   openWhenListed(sessions, v.sessionId);
 }
 
-/**
- * The main-chat swap, decided in one place.
- *
- * Switching versions is a swap of which one sits in the main chat, and the sidebar
- * entry goes with it: opening a version that is currently collected in the tree
- * brings it back out and puts the one you were reading away. Opening a version that
- * is already in the main chat changes nothing — the reader put it there on purpose,
- * and a click on it is just "show me that one". A click inside the version already
- * on screen is not a switch at all.
- */
-function swapOnVersionSwitch(sessions, left, version, versions) {
-  if (!version || !left || version.sessionId === left) return;
-  if (version.archived !== true) return;
-  collectLeftVersion(sessions, left, version.sessionId, versions);
-}
-
 function collectLeftVersion(sessions, left, target, versions) {
   if (!left || left === target) return;
   const list = versions || [];
@@ -524,6 +508,41 @@ function collectLeftVersion(sessions, left, target, versions) {
       // Nothing to recover from: the version simply stays where it is.
       console.warn('[dsh-tree-view] could not collect the version you left:', error && error.message);
     });
+}
+
+/**
+ * Put the version you leave away — but only once the conversation area is really
+ * showing the version you asked for.
+ *
+ * The order is the whole point, and it used to be wrong. The collect was issued in
+ * the same tick as the click, so the session on screen was archived while the
+ * reveal of the target was still in flight; the workspace then re-revealed what it
+ * had been showing (its own fallback) and the reader ended up on the session they
+ * had just left. That is what made clicking a second node look like it jumped to
+ * the new session instead of the node that was clicked.
+ *
+ * The `sessionId` the slot hands back is the app's own signal that the switch has
+ * landed, so the collect waits for it. If the switch never lands, nothing is
+ * collected at all — a version left in the sidebar is a much smaller surprise than
+ * an archive issued against the wrong session.
+ */
+function useDeferredCollect(sessions, sessionId) {
+  const pending = React.useRef(null);
+  React.useEffect(function () {
+    const entry = pending.current;
+    if (!entry) return;
+    if (entry.target !== sessionId) {
+      // Landed somewhere else entirely: the intent is stale, drop it.
+      pending.current = null;
+      return;
+    }
+    pending.current = null;
+    collectLeftVersion(entry.sessions, entry.left, entry.target, entry.versions);
+  }, [sessionId]);
+  return function (left, target, versions) {
+    if (!left || left === target) return;
+    pending.current = { sessions: sessions, left: left, target: target, versions: versions };
+  };
 }
 
 /**
@@ -1174,7 +1193,17 @@ const CSS = [
   '.mtx-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}',
   '.mtx-edge{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 45%,transparent);stroke-width:1.5}',
   '.mtx-edge[data-path]{stroke:var(--mtx-accent);stroke-width:2}',
-  '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--mtx-surface));box-shadow:0 2px 10px var(--mtx-shadow);cursor:pointer;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
+  // Paint cost is what makes a big tree lag when the canvas is zoomed: the whole
+  // world is re-rastered whenever the scale changes enough, and 60-odd cards with
+  // blurred shadows cost ~90ms of that (measured: hiding the cards drops the same
+  // zoom burst from 94ms to 5ms). So each card is contained — its own paint can no
+  // longer invalidate the rest — the shadow lost most of its blur, and
+  // `content-visibility` lets the browser skip the cards that are off screen
+  // entirely, with `contain-intrinsic-size: auto` remembering the height each one
+  // had the last time it was rendered (the fallback only applies to a card that
+  // has never been on screen, and card height never affects the layout: cards are
+  // placed by the tree, not by flow).
+  '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--mtx-surface));box-shadow:0 1px 3px var(--mtx-shadow);cursor:pointer;user-select:none;contain:layout paint style;content-visibility:auto;contain-intrinsic-size:auto 58px;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
   '.mtx-card:hover{box-shadow:0 6px 22px var(--mtx-shadow-strong);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent)}',
   // A card is highlighted when it is on the line you are reading: the turns you
   // are adding and the shared history above the fork are the same line, so both
@@ -1616,12 +1645,14 @@ return {
     /** Ring beneath a bubble: ‹ i/m › switching whole version sessions. */
     function VersionRing(props) {
       const ring = props.ring;
+      const deferCollect = useDeferredCollect(sessions, props.sessionId);
       if (!ring) return null;
       const go = function (delta) {
         const next = ring.alternatives[ring.index + delta];
         if (!next) return;
-        // The ring is the same switch, so it follows the same swap rule.
-        swapOnVersionSwitch(sessions, props.sessionId, next, props.versions);
+        // The ring is the same switch, so it follows the same swap rules: the
+        // version you leave is collected, but only after the switch has landed.
+        if (next.archived === true) deferCollect(props.sessionId, next.sessionId, props.versions);
         openVersionTarget(sessions, next);
       };
       return React.createElement('div', { className: 'mtx-ring' },
@@ -1922,6 +1953,9 @@ return {
       // part of that seam disables exactly those controls — instead of letting
       // them fail at click time, or hiding a session it could no longer show.
       const archive = (tree && tree.archiveSupport) || { ok: true, read: true, hide: true, show: true, missing: [] };
+      // Putting the version you leave away waits until this view is actually
+      // showing the one you clicked (see useDeferredCollect).
+      const deferCollect = useDeferredCollect(sessions, sessionId);
 
       const graphRef = React.useRef(null);
       const worldRef = React.useRef(null);
@@ -1960,8 +1994,15 @@ return {
       const rafRef = React.useRef(0);
       const fittedRef = React.useRef(false);
       // While the canvas is moving the world is one GPU layer (smooth pan/zoom);
-      // this timer is what takes the hint back off once the gesture settles.
+      // these keep the raster fresh at the scale on screen without giving the layer
+      // up (see applyView).
       const promoteTimerRef = React.useRef(0);
+      const rasterFrameRef = React.useRef(0);
+      const rasterScaleRef = React.useRef(0);
+      // Measured card and group-name heights, refreshed once per layout (see
+      // measureHeights): the frame loop must not read layout itself.
+      const cardHeights = React.useRef(new Map());
+      const measureRef = React.useRef(0);
 
       const fullNodes = React.useMemo(function () {
         return buildTurnTree(versions, sessionId, { dropEmptyForks: prefs.dropEmptyForks, subagentIds: subagentIds });
@@ -2049,23 +2090,46 @@ return {
         return boxes;
       })();
 
-      // Panning and zooming set a transform on the world; leaving that layer
-      // promoted for good would keep the raster drawn for the old scale and let
-      // the GPU stretch it, which is exactly what makes zoomed-in text blurry.
-      // So the hint is raised for the duration of the movement only, and dropped
-      // once it settles: taking it off forces a repaint at the scale actually on
-      // screen, so the tree is redrawn sharp instead of scaled up soft.
+      // Panning and zooming set a transform on the world. Leaving that layer
+      // promoted for good would keep the raster drawn for the old scale and let the
+      // GPU stretch it — that is what made zoomed-in text blurry. But dropping the
+      // hint for good is just as wrong in the other direction: with no layer to
+      // stretch, the next gesture re-rasterises the whole tree mid-drag, and the
+      // measurement is blunt — 44 to 90ms per gesture that way, 3ms while the layer
+      // survives. So the raster is refreshed instead of the layer being dropped:
+      // the hint goes off for exactly one frame, which forces a paint at the scale
+      // now on screen, and comes straight back so the next gesture has a layer to
+      // stretch. It is only worth doing when the scale actually changed — a pan
+      // moves the same raster and stays sharp either way.
       function applyView() {
         const el = worldRef.current;
         const view = viewRef.current;
         if (el) {
+          const zoomed = rasterScaleRef.current !== view.scale;
           el.style.willChange = 'transform';
-          if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
-          promoteTimerRef.current = setTimeout(function () {
-            promoteTimerRef.current = 0;
-            const node = worldRef.current;
-            if (node) node.style.willChange = '';
-          }, 160);
+          if (zoomed) {
+            rasterScaleRef.current = view.scale;
+            if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
+            promoteTimerRef.current = setTimeout(function () {
+              promoteTimerRef.current = 0;
+              const node = worldRef.current;
+              if (!node) return;
+              node.style.willChange = '';
+              if (rasterFrameRef.current) cancelAnimationFrame(rasterFrameRef.current);
+              // Two frames, not one: the first is when the browser paints the world
+              // unpromoted at the scale on screen (which is what makes the text
+              // sharp), the second is where the layer comes back on top of that
+              // fresh paint. Re-promoting in the same frame can land before the
+              // paint and leave the stale raster in place.
+              rasterFrameRef.current = requestAnimationFrame(function () {
+                rasterFrameRef.current = requestAnimationFrame(function () {
+                  rasterFrameRef.current = 0;
+                  const again = worldRef.current;
+                  if (again) again.style.willChange = 'transform';
+                });
+              });
+            }, 400);
+          }
           el.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.scale + ')';
         }
         positionGroupNames();
@@ -2089,7 +2153,7 @@ return {
         groupNameEls.current.forEach(function (entry) {
           const el = entry.el;
           if (!el) return;
-          const nameHeight = (el.offsetHeight || 20) / view.scale;
+          const nameHeight = (entry.nameHeight || 20) / view.scale;
           const minTop = 6;
           const maxTop = Math.max(minTop, entry.height - nameHeight - 6);
           const wanted = Math.max(visibleTop + 8, entry.top + minTop) - entry.top;
@@ -2111,10 +2175,36 @@ return {
           const a = springs.current.get(e.from);
           const b = springs.current.get(e.to);
           if (!el || !a || !b) continue;
-          const fromEl = cardEls.current.get(e.from);
-          const h = fromEl ? fromEl.offsetHeight : 58;
+          // Height comes from the last measurement (see measureHeights) rather
+          // than from a layout read here: interleaving those reads with writing
+          // the paths forced a layout per edge, on every animation frame.
+          const h = cardHeights.current.get(e.from) || CARD_H;
           el.setAttribute('d', edgePath(a.x, a.y + h, b.x, b.y));
         }
+      }
+
+      /**
+       * Measure what the frame loop needs once, after a layout.
+       *
+       * Both numbers are read-outs of the browser's own layout (card height for
+       * the edge anchor, group-name height for the sticky clamp). Reading them
+       * from inside the animation loop is what makes a canvas of 60 cards stutter:
+       * each `offsetHeight` read after a style write invalidates layout again.
+       */
+      function measureHeights() {
+        if (measureRef.current) cancelAnimationFrame(measureRef.current);
+        measureRef.current = requestAnimationFrame(function () {
+          measureRef.current = 0;
+          cardEls.current.forEach(function (el, id) {
+            const h = el && el.offsetHeight;
+            if (h) cardHeights.current.set(id, h);
+          });
+          groupNameEls.current.forEach(function (entry) {
+            const h = entry.el && entry.el.offsetHeight;
+            entry.nameHeight = h || entry.nameHeight || 20;
+          });
+          renderFrame();
+        });
       }
 
       function kick() {
@@ -2195,6 +2285,11 @@ return {
         }
         applyView();
         kick();
+        // Card and group-name heights are only needed by the edge paths and the
+        // sticky group names. Measuring them here — once per layout, after the
+        // browser has laid the cards out — keeps those reads out of the frame
+        // loop, where a forced layout per edge was the other half of the cost.
+        measureHeights();
         return function () {
           if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
         };
@@ -2240,9 +2335,10 @@ return {
           return;
         }
         // Anything else is a swap: a version that is collected in the tree comes
-        // back out, and the one you were reading goes in. A version already in the
-        // main chat just opens.
-        swapOnVersionSwitch(sessions, sessionId, v, versions);
+        // back out, and the one you were reading goes in — the latter only once the
+        // switch has landed (see useDeferredCollect: collecting first is what made a
+        // second click land on the session you had just left).
+        if (v.archived === true) deferCollect(sessionId, v.sessionId, versions);
         openVersionTarget(sessions, v);
         showChat();
         if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
@@ -2407,18 +2503,22 @@ return {
         // that follows to the graph — so the dialog's buttons received no click
         // at all and Cancel looked dead. Overlays belong on this list.
         if (ev.target.closest && ev.target.closest('.mtx-tool,.mtx-link,.mtx-rename,.mtx-menu,.mtx-confirm')) return;
-        if (cardEl) {
-          // A press on a node only selects it: nodes stay where the layout put
-          // them. Dragging them around was a way to lose the shape of a branch,
-          // and a tree is meant to be read, not hand-arranged.
-          const id = cardEl.getAttribute('data-id');
-          if (!springs.current.get(id)) return;
-          dragRef.current = { kind: 'node', id: id, moved: false, sx: ev.clientX, sy: ev.clientY };
-        } else {
-          const view = viewRef.current;
-          dragRef.current = { kind: 'pan', moved: false, sx: ev.clientX, sy: ev.clientY, ox: view.x, oy: view.y };
-          graphRef.current.setAttribute('data-panning', '');
-        }
+        const view = viewRef.current;
+        // A press on empty canvas pans right away. A press on a card is ambiguous
+        // — it is both "open this version" and "grab the canvas here" — so the
+        // decision waits for the first movement: under the threshold the release
+        // opens the node, past it the press turns into a pan and the release opens
+        // nothing. Nodes are still never dragged around: the tree stays where the
+        // layout put it. Before this, a press that landed on a card could not pan
+        // the canvas at all.
+        dragRef.current = {
+          kind: cardEl ? 'node' : 'pan',
+          id: cardEl ? cardEl.getAttribute('data-id') : null,
+          moved: false,
+          sx: ev.clientX, sy: ev.clientY,
+          ox: view.x, oy: view.y,
+        };
+        if (!cardEl) graphRef.current.setAttribute('data-panning', '');
         try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch (e) {}
       }
 
@@ -2427,13 +2527,15 @@ return {
         if (!d) return;
         const dx = ev.clientX - d.sx;
         const dy = ev.clientY - d.sy;
-        if (!d.moved && Math.abs(dx) + Math.abs(dy) > 5) d.moved = true;
-        if (!d.moved) return;
-        if (d.kind === 'pan') {
-          viewRef.current.x = d.ox + dx;
-          viewRef.current.y = d.oy + dy;
-          applyView();
+        if (!d.moved && Math.abs(dx) + Math.abs(dy) > 5) {
+          d.moved = true;
+          // Whatever the press started on, from here it is a pan.
+          if (graphRef.current) graphRef.current.setAttribute('data-panning', '');
         }
+        if (!d.moved) return;
+        viewRef.current.x = d.ox + dx;
+        viewRef.current.y = d.oy + dy;
+        applyView();
       }
 
       function onPointerUp() {
@@ -2441,7 +2543,8 @@ return {
         dragRef.current = null;
         if (graphRef.current) graphRef.current.removeAttribute('data-panning');
         if (!d) return;
-        if (d.kind === 'node' && !d.moved) openVersion(d.id);
+        // A press that never moved is a click, and a click on a card opens it.
+        if (!d.moved && d.id) openVersion(d.id);
       }
 
       function cardTitle(n) {
