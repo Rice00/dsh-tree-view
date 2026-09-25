@@ -8,6 +8,7 @@
 
 Edit an old message and the conversation forks from that turn; every version lives in one tree, and the sidebar keeps a single entry.
 
+[![npm](https://img.shields.io/npm/v/dsh-tree-view?color=2f7de1)](https://www.npmjs.com/package/dsh-tree-view)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f7de1.svg)](./LICENSE)
 [![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#install)
 [![DSH: 0.1.5-rc.2](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff.svg)](#faq)
@@ -72,7 +73,13 @@ Archiving is the only switch this plugin touches on your data, so it gets its ow
 
 ## Install
 
-Install from GitHub (not published to npm yet):
+Install from npm:
+
+```bash
+dsh plugin --profile web add dsh-tree-view
+```
+
+Or straight from GitHub:
 
 ```bash
 dsh plugin --profile web add github:Rice00/dsh-tree-view
@@ -92,8 +99,10 @@ dsh plugin --profile web add link:/abs/path/to/dsh-tree-view
 
 ```
 Please install the DSH plugin dsh-tree-view:
-1) Into the web profile: dsh plugin --profile web add github:Rice00/dsh-tree-view
-   (from a local checkout: dsh plugin --profile web add link:<absolute-path>)
+1) Into the web profile:
+     dsh plugin --profile web add dsh-tree-view                 (npm)
+     dsh plugin --profile web add github:Rice00/dsh-tree-view   (GitHub)
+     dsh plugin --profile web add link:<absolute-path>          (local checkout)
 2) Restart that profile; UI-only changes just need a browser refresh.
 3) Verify: a Tree tab in the conversation panel, a TreeView section in Settings.
 ```

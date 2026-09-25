@@ -9,6 +9,7 @@
 编辑一条旧消息，对话从那一刻分叉；分叉出来的版本都住进同一棵树，侧栏里始终只有一条。
 
 
+[![npm](https://img.shields.io/npm/v/dsh-tree-view?color=2f7de1)](https://www.npmjs.com/package/dsh-tree-view)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f7de1.svg)](./LICENSE)
 [![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#安装)
 [![DSH: 0.1.5-rc.2](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff.svg)](#常见问题)
@@ -73,7 +74,13 @@
 
 ## 安装
 
-从 GitHub 装（npm 上还没有发布）：
+从 npm 装：
+
+```bash
+dsh plugin --profile web add dsh-tree-view
+```
+
+也可以直接从 GitHub 装：
 
 ```bash
 dsh plugin --profile web add github:Rice00/dsh-tree-view
@@ -93,8 +100,10 @@ dsh plugin --profile web add link:/abs/path/to/dsh-tree-view
 
 ```
 请帮我安装 DSH 插件 dsh-tree-view：
-1) 装进 web profile：dsh plugin --profile web add github:Rice00/dsh-tree-view
-   （本地检出则用：dsh plugin --profile web add link:<绝对路径>）
+1) 装进 web profile：
+     dsh plugin --profile web add dsh-tree-view                    （npm）
+     dsh plugin --profile web add github:Rice00/dsh-tree-view      （GitHub）
+     dsh plugin --profile web add link:<绝对路径>                   （本地检出）
 2) 重启该 profile；只改界面的话刷新浏览器即可。
 3) 验证：会话面板出现 Tree 标签页，设置里出现 TreeView 分类。
 ```
