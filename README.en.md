@@ -30,18 +30,18 @@ Switch the conversation panel to Tree and the whole family is drawn on one canva
 
 | Feature | What it does |
 |---|---|
-| **Jump to a branch** | Every node is a real session version; clicking it moves you onto that line. Underneath it is only an archived flag being flipped: the version you clicked is unarchived back into the sidebar, and the one you were reading is archived into the tree — so moving around the tree moves the sidebar slot rather than adding to it. |
-| **Parallel lines** | A version *is* a session. Right-click and send several of them "back into the main chat" — that step only unarchives, it touches nothing else — and two branches can work at the same time without disturbing each other; collect them again when you are done. |
-| **One-click collect** | The panel toolbar's "collect every other branch" gathers the family's strays into the tree at once, leaving the one you are using. If any of them is still generating a reply it asks first — stop and collect, or cancel — so nothing is killed quietly. |
-| **Folding** | A run of turns with no fork in it — the opening every version shares included — folds into a single node once it reaches the configured length; click to unfold. The threshold is chosen in Settings and the toolbar folds it back at any time. |
-| **Hiding empty forks** | Forks that only copied this conversation without adding a turn of their own are not drawn; the toolbar carries the same switch. |
-| **Renaming branches** | Right-click a node to name a branch. The sidebar title stays the host's own (`(1)`, `(2)` and all) — only the box drawn in the tree is named. |
-| **Version ring** | The `‹ n/m ›` ring under a message, to move between versions of the same question without leaving the chat. |
-| **Highlighted reading path** | The whole line you are reading — shared opening included — is highlighted on the canvas, so where you came from, where you are and where you can still go read off one picture. |
-| **Resume where you left off** | Coming back to this family from another conversation resumes the version you last read (off by default; switchable in Settings). |
-| **Subagent tags** | A subagent session hanging under this conversation carries a tag, so it is not read as one of your versions. |
-| **Archived branches stay** | A version you archive is still drawn, dimmed and marked "archived" — archiving takes an entry out of the sidebar, it does not delete a branch. |
-| **Following the theme** | Surface, border, accent, state and even shadow colours come from the host's theme tokens: light follows light, dark follows dark. |
+| 🖱️ **Jump to a branch** | Every node is a real session version; clicking it moves you onto that line. Underneath it is only an archived flag being flipped: the version you clicked is unarchived back into the sidebar, and the one you were reading is archived into the tree — so moving around the tree moves the sidebar slot rather than adding to it. |
+| 🔀 **Parallel lines** | A version *is* a session. Right-click and send several of them "back into the main chat" — that step only unarchives, it touches nothing else — and two branches can work at the same time without disturbing each other; collect them again when you are done. |
+| 🧹 **One-click collect** | The panel toolbar's "collect every other branch" gathers the family's strays into the tree at once, leaving the one you are using. If any of them is still generating a reply it asks first — stop and collect, or cancel — so nothing is killed quietly. |
+| 🗂️ **Folding** | A run of turns with no fork in it — the opening every version shares included — folds into a single node once it reaches the configured length; click to unfold. The threshold is chosen in Settings and the toolbar folds it back at any time. |
+| 🚫 **Hiding empty forks** | Forks that only copied this conversation without adding a turn of their own are not drawn; the toolbar carries the same switch. |
+| ✏️ **Renaming branches** | Right-click a node to name a branch. The sidebar title stays the host's own (`(1)`, `(2)` and all) — only the box drawn in the tree is named. |
+| 🔄 **Version ring** | The `‹ n/m ›` ring under a message, to move between versions of the same question without leaving the chat. |
+| 🎯 **Highlighted reading path** | The whole line you are reading — shared opening included — is highlighted on the canvas, so where you came from, where you are and where you can still go read off one picture. |
+| 📌 **Resume where you left off** | Coming back to this family from another conversation resumes the version you last read (off by default; switchable in Settings). |
+| 🤖 **Subagent tags** | A subagent session hanging under this conversation carries a tag, so it is not read as one of your versions. |
+| 📦 **Archived branches stay** | A version you archive is still drawn, dimmed and marked "archived" — archiving takes an entry out of the sidebar, it does not delete a branch. |
+| 🎨 **Following the theme** | Surface, border, accent, state and even shadow colours come from the host's theme tokens: light follows light, dark follows dark. |
 
 ## How it works
 
@@ -161,7 +161,7 @@ lib/session-record.js   reads every version's record into one shape
 lib/archive-adapter.js  the only hard coupling to host archiving
 plugin.client.js        client half (source)
 lib/client.js           client half (bundle, built by scripts/build-client.mjs)
-test/                   14 behavioural test files
+test/                   15 behavioural test files
 docs/                   architecture / tree data model / development
 ```
 
