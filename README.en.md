@@ -6,6 +6,8 @@
 
 **TreeView — use a conversation as a tree**
 
+[简体中文](README.md) | English
+
 Edit an old message and the conversation forks from that turn; every version lives in one tree, and the sidebar keeps a single entry.
 
 [![npm](https://img.shields.io/npm/v/dsh-tree-view?color=2f7de1)](https://www.npmjs.com/package/dsh-tree-view)
