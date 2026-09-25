@@ -13,7 +13,7 @@ Edit an old message and the conversation forks from that turn; every version liv
 [![npm](https://img.shields.io/npm/v/dsh-tree-view?color=2f7de1)](https://www.npmjs.com/package/dsh-tree-view)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f7de1.svg)](./LICENSE)
 [![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#install)
-[![DSH: 0.1.5-rc.2](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff.svg)](#faq)
+[![DSH: 0.1.5.x](https://img.shields.io/badge/dsh-0.1.5.x-4b8dff.svg)](#versions-and-compatibility)
 [![PRs: welcome](https://img.shields.io/badge/PRs-welcome-7096d1.svg)](#contributing)
 [![GitHub stars](https://img.shields.io/github/stars/Rice00/dsh-tree-view?style=flat&label=stars&color=7096d1)](https://github.com/Rice00/dsh-tree-view/stargazers)
 
@@ -111,6 +111,18 @@ Please install the DSH plugin dsh-tree-view:
 
 </details>
 
+## Versions and compatibility
+
+**1.0.0 freezes the plugin's own surface**: the configuration keys, the three durable formats — the `message-tree/version` marker in the session log (`schemaVersion: 1`), the sidecar store `~/.dsh/storages/tree-view/state.json`, and the browser preference `dsh-tree-view:prefs` (`v: 2`) — and the verified host range below. From here they change only in a major version, and with a migration. A host outside that range is not a broken promise: it calls for a compatibility release.
+
+| DSH version | State |
+|---|---|
+| `0.1.5-rc.2` | Verified — CI installs this published host and runs the end-to-end acceptance: edit, retry, reading branches back after a restart, nested markers and image retention |
+| `0.1.5-rc.3` | Inside the same `engines` range, not verified on its own |
+| `0.1.6` / `0.1.7` | Outside the range — try it, and please open an issue if something breaks |
+
+`engines.dsh` only names a range that has been verified, so npm will not treat an unverified host as a supported environment. When the host moves to a new line, run the acceptance in CI's host matrix first, then widen the upper bound.
+
 ## Relationship to upstream
 
 This repository is a fork of [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit), which supplies the host-side branching engine (itself built on [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)). The emphasis differs: upstream is a "edit message" plugin, while this fork takes "where do the versions made by editing live" as the main problem — hence the tree, the slot swap and folding.
@@ -135,7 +147,7 @@ Folding exists for that: the threshold can be set to Never, and any run can be f
 Yes. They are history-seeded sessions too, so the plugin derives the fork point from the seed length and draws them as a version on that line. DSH itself limits that button to the last message of a completed turn; the plugin does not change that.
 
 **Which DSH versions are supported?**
-Verified against `0.1.5-rc.2`; `engines.dsh` declares `>=0.1.5-rc.2 <0.1.6-0`. Restart DSH after updating the plugin.
+See "Versions and compatibility". `engines.dsh` declares `>=0.1.5-rc.2 <0.1.6-0`, and `0.1.5-rc.2` is the one verified inside it. Restart DSH after updating the plugin.
 
 ## Settings
 
@@ -172,7 +184,7 @@ lib/session-record.js   reads every version's record into one shape
 lib/archive-adapter.js  the only hard coupling to host archiving
 plugin.client.js        client half (source)
 lib/client.js           client half (bundle, built by scripts/build-client.mjs)
-test/                   15 behavioural test files
+test/                   16 behavioural test files
 docs/                   architecture / tree data model / development
 ```
 

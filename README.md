@@ -14,7 +14,7 @@
 [![npm](https://img.shields.io/npm/v/dsh-tree-view?color=2f7de1)](https://www.npmjs.com/package/dsh-tree-view)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f7de1.svg)](./LICENSE)
 [![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#安装)
-[![DSH: 0.1.5-rc.2](https://img.shields.io/badge/dsh-0.1.5--rc.2-4b8dff.svg)](#常见问题)
+[![DSH: 0.1.5.x](https://img.shields.io/badge/dsh-0.1.5.x-4b8dff.svg)](#版本与兼容)
 [![PRs: welcome](https://img.shields.io/badge/PRs-welcome-7096d1.svg)](#参与贡献)
 [![GitHub stars](https://img.shields.io/github/stars/Rice00/dsh-tree-view?style=flat&label=stars&color=7096d1)](https://github.com/Rice00/dsh-tree-view/stargazers)
 
@@ -112,6 +112,18 @@ dsh plugin --profile web add link:/abs/path/to/dsh-tree-view
 
 </details>
 
+## 版本与兼容
+
+**1.0.0 冻结的是插件自己的面**：配置键，三个持久格式 —— 会话日志里的 `message-tree/version` 标记（`schemaVersion: 1`）、sidecar 存储 `~/.dsh/storages/tree-view/state.json`、浏览器偏好 `dsh-tree-view:prefs`（`v: 2`）—— 以及下表里已验收的宿主区间。它们此后只在 major 版本里变，并且带迁移；宿主越出这个区间不算破坏承诺，而是需要一次兼容版本。
+
+| DSH 版本 | 状态 |
+|---|---|
+| `0.1.5-rc.2` | 已验收 —— CI 装这个正式发布版跑端到端验收：编辑、重试、重启后读回分支、嵌套标记与图片留存 |
+| `0.1.5-rc.3` | 在同一 `engines` 区间内，尚未单独验收 |
+| `0.1.6` / `0.1.7` | 区间之外 —— 可以装来试，出问题欢迎开 issue |
+
+`engines.dsh` 只写验收过的区间，所以 npm 不会把一个没验过的宿主当成受支持环境。宿主换版本线时，先在 CI 的宿主矩阵里跑过验收，再把上界放宽。
+
 ## 与上游的关系
 
 本仓库是 [dsh-plugin-message-edit](https://github.com/SpookySandwich/dsh-plugin-message-edit) 的 fork，宿主端的分支引擎来自它（其分支逻辑又源自 [dsh-message-edit](https://github.com/Moeblack/dsh-message-edit)）。区别在重心：上游是「编辑消息」插件，本 fork 把「编辑出来的那些版本住在哪里」当成主要问题 —— 于是有了树、换位和折叠。
@@ -136,7 +148,7 @@ dsh plugin --profile web add link:/abs/path/to/dsh-tree-view
 会。它同样是一个以历史为种子的会话，插件按种子长度算出分叉点，画成这条线上的一个版本。DSH 自己限制这个按钮只能用在**已完成轮次的最后一条消息**上，插件不改这个限制。
 
 **支持哪个版本的 DSH？**
-已验证 `0.1.5-rc.2`；`engines.dsh` 声明 `>=0.1.5-rc.2 <0.1.6-0`。更新插件后请重启 DSH。
+见「版本与兼容」。`engines.dsh` 声明 `>=0.1.5-rc.2 <0.1.6-0`，区间里已验收的是 `0.1.5-rc.2`。更新插件后请重启 DSH。
 
 ## 设置
 
@@ -173,7 +185,7 @@ lib/session-record.js   把各版本的会话记录读成同一种形状
 lib/archive-adapter.js  唯一与宿主归档强耦合的地方
 plugin.client.js        客户端半边（源）
 lib/client.js           客户端半边（产物，scripts/build-client.mjs 打包）
-test/                   15 个行为级测试文件
+test/                   16 个行为级测试文件
 docs/                   架构 / 树数据模型 / 开发
 ```
 

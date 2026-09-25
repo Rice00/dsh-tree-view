@@ -9,16 +9,23 @@ This guide covers building, testing, packaging, and installing `dsh-tree-view`.
 ```
 dsh-tree-view/
 ├── lib/
-│   ├── index.js          # Host-side Cordis plugin (routes, session log processing)
-│   ├── tree-logic.js     # Pure tree algorithms (shared with client and tests)
-│   └── client.js         # Generated client bundle (wrapped from plugin.client.js)
-├── plugin.client.js      # Source client-side UI and React components
+│   ├── index.js           # Host-side Cordis plugin (routes, session log processing)
+│   ├── tree-logic.js      # Pure tree algorithms (shared with client and tests)
+│   ├── session-record.js  # Reads every session shape into one record
+│   ├── tree-state.js      # Sidecar store: branch labels and collected versions
+│   ├── archive-adapter.js # The one place coupled to the host's archive state
+│   └── client.js          # Generated client bundle (wrapped from plugin.client.js)
+├── plugin.client.js       # Source client-side UI and React components
 ├── scripts/
-│   └── build-client.mjs  # Build script wrapping plugin.client.js into lib/client.js
-├── test/
-│   └── tree.test.mjs     # Automated test suite (36+ unit tests)
-├── cordis.patch.yml      # Service dependencies and injection metadata
-├── docs/                 # Technical architecture and data model documentation
+│   ├── build-client.mjs   # Build script wrapping plugin.client.js into lib/client.js
+│   ├── check-package.mjs  # Packs the plugin and verifies the tarball
+│   └── …                  # QA fixture and the DSH acceptance runners
+├── test/                  # 16 behaviour-level test files (node:test)
+├── .github/
+│   ├── workflows/ci.yml   # Regression suite, package check, official-host acceptance
+│   └── release-notes/     # One file per release; upstream's are named upstream-*
+├── cordis.patch.yml       # Service dependencies and injection metadata
+├── docs/                  # Technical architecture and data model documentation
 └── package.json
 ```
 
@@ -53,17 +60,16 @@ Automatically builds the client first, checks that it matches the source, then
 runs the Node test runner. Install development dependencies with `npm ci` on a
 fresh checkout before running tests (Node 22.19+ or Node 24).
 
-- `test/tree.test.mjs`: 36 assertions covering branch and version-tree behavior.
-- `test/client-images.test.mjs`: loads the generated client through its module
-  loader, mounts its registered user-message component using React and jsdom,
-  and checks image delegation, multiple/image-only messages, old-host fallback,
-  text-only messages, and entering/cancelling an edit. Host services and the image
-  gallery are test doubles; these are not full DSH integration tests.
-- `test/client-registration.test.mjs`: checks module dependencies and visible
-  failures when services or registrations are unavailable.
-- `test/session-record.test.mjs` and `test/host-compatibility.test.mjs`: cover
-  legacy/current session shapes, live/resumed edit requests, retained images,
-  retry ancestry, nested version markers, and cache invalidation.
+- `test/tree.test.mjs`: branch construction, sibling fan-out, ghost recovery,
+  active-path and ring-index behaviour (custom runner; prints `all passed`).
+- `test/client-*.test.mjs`: the client half through its module loader — tree
+  filtering and folding, the re-frame after a fold, subagent marks, host theme
+  tokens, image delegation, settings, and that a zoomed canvas is not left
+  behind as a stretched GPU layer.
+- `test/session-record.test.mjs`, `test/host-compatibility.test.mjs` and
+  `test/tree-payload.test.mjs`: legacy and current session shapes, live and
+  resumed edit requests, retained images, retry ancestry, nested version
+  markers, cache invalidation, and the payload the tree view serves.
 
 GitHub Actions runs these checks for pull requests and branch pushes, on
 Linux (Node 22 and 24) and Windows (Node 22). It also runs:
@@ -88,7 +94,7 @@ the native viewer, enter/cancel an edit, then verify the original attachments
 survive an edit submission. CI's gallery double cannot verify native image
 loading, lightbox behavior, or compatibility with DSH's module injection.
 
-To add new tests, edit [`test/tree.test.mjs`](../test/tree.test.mjs).
+To add a test, drop a `test/*.test.mjs` file: `npm test` runs the whole directory.
 
 ### Optional real DSH acceptance
 
@@ -131,19 +137,60 @@ CI runs this on Linux and Windows in addition to the regression suite.
 
 ---
 
-## 4. Local Installation into DSH Desktop
+## 4. Release & Compatibility Policy
+
+`1.0.0` freezes the plugin's own surface, and only that:
+
+- the configuration keys the settings panel writes;
+- the three durable formats: the `message-tree/version` marker written into the
+  session log (`schemaVersion: 1`), the sidecar store
+  `~/.dsh/storages/tree-view/state.json`, and the browser preference
+  `dsh-tree-view:prefs` (`v: 2`);
+- the verified host range (see the README, "版本与兼容" / "Versions and compatibility").
+
+What that means for the next change:
+
+| Change | Version |
+|---|---|
+| A durable format or a configuration key changes shape | major, with a migration |
+| New behaviour, new setting, new route action — older state and older hosts keep working | minor |
+| Bug fix, documentation, packaging | patch |
+
+The host is deliberately outside that promise. `engines.dsh` names a range that
+has been verified, never one that merely looks compatible, so npm cannot hand an
+unverified host to a user as a supported environment. CI's `official-host` job
+runs the acceptance against the published host (currently
+`@deepseek-ai/dsh@0.1.5-rc.2`, installed in the workflow). When a new host line
+ships, add it to that job first, watch it pass, and only then widen the upper
+bound here and in `package.json`.
+
+Release checklist:
+
+1. `npm test` — builds the client, checks it against the source, runs every file.
+2. `npm run check:package` — packs for real, verifies the tarball's contents.
+3. CI green on the pushed commit, `official-host` included.
+4. Bump `version` in `package.json`, and describe the release in
+   `.github/release-notes/v<version>.md`. The inherited notes of the upstream
+   project are named `upstream-*` and are not this project's releases.
+5. Commit, tag `v<version>`, push the branch and the tag.
+6. `npm publish` from the tagged commit; `prepack` rebuilds the client into the
+   tarball, so a stale generated client cannot be shipped.
+
+---
+
+## 5. Local Installation into DSH Desktop
 
 ### Step 1: Build and Package
 ```bash
 npm run build
 npm pack
 ```
-This produces a tarball: `dsh-tree-view-0.1.0.tgz`.
+This produces a tarball named after the version, e.g. `dsh-tree-view-1.0.0.tgz`.
 
 ### Step 2: Install into DSH Profile
 To install into the DSH Desktop profile:
 ```bash
-dsh plugin --profile desktop add file:/path/to/dsh-tree-view-0.1.0.tgz
+dsh plugin --profile desktop add file:/path/to/dsh-tree-view-1.0.0.tgz
 ```
 Or sync files directly into `~/.dsh/profiles/desktop/node_modules/dsh-tree-view/`.
 
