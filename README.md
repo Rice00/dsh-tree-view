@@ -14,7 +14,7 @@
 [![npm](https://img.shields.io/npm/v/dsh-tree-view?color=2f7de1)](https://www.npmjs.com/package/dsh-tree-view)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f7de1.svg)](./LICENSE)
 [![Platform: DSH web](https://img.shields.io/badge/platform-DSH%20web-334eac.svg)](#安装)
-[![DSH: 0.1.5.x](https://img.shields.io/badge/dsh-0.1.5.x-4b8dff.svg)](#版本与兼容)
+[![DSH: 0.1.x](https://img.shields.io/badge/dsh-0.1.x-4b8dff.svg)](#版本与兼容)
 [![PRs: welcome](https://img.shields.io/badge/PRs-welcome-7096d1.svg)](#参与贡献)
 [![GitHub stars](https://img.shields.io/github/stars/Rice00/dsh-tree-view?style=flat&label=stars&color=7096d1)](https://github.com/Rice00/dsh-tree-view/stargazers)
 
