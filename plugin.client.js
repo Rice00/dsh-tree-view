@@ -1714,9 +1714,14 @@ return {
         // and that subscription fires on the next session-list change — which
         // is how a restore used to land minutes late, in the middle of typing.
         const list = sessions.list();
-        const byId = list && typeof list.getSnapshot === 'function'
-          ? list.getSnapshot().byId
-          : null;
+        const snapshot = list && typeof list.getSnapshot === 'function' ? list.getSnapshot() : null;
+        // A host that publishes its list asynchronously — 0.1.7 does — can have
+        // this client applied before the first entry arrives. That is not the
+        // same fact as "the branch is gone": waiting keeps the restore, while
+        // marking the family as handled here would drop it for the whole page
+        // load. A snapshot without a phase is an older host, which is ready.
+        if (!snapshot || snapshot.phase === 'pending') return;
+        const byId = snapshot.byId;
         if (!byId || byId[target.sessionId] === undefined) {
           restoredFamilies.add(root);
           return;

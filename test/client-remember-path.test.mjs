@@ -85,12 +85,15 @@ async function mountChat(t, options = {}) {
     if (!options.listed || options.listed.includes(v.sessionId)) byId[v.sessionId] = { id: v.sessionId };
   }
   const subscribers = [];
+  // `phase` mirrors the host store: it is `pending` until the controller has
+  // published its first list, which 0.1.7 can be later than this plugin's boot.
+  let phase = options.listPhase || 'ready';
   const list = {
     subscribe(fn) {
       subscribers.push(fn);
       return () => { const at = subscribers.indexOf(fn); if (at !== -1) subscribers.splice(at, 1); };
     },
-    getSnapshot() { return { byId }; },
+    getSnapshot() { return { byId, phase }; },
   };
 
   const previous = new Map();
@@ -158,7 +161,13 @@ async function mountChat(t, options = {}) {
     await act(async () => { for (const fn of [...subscribers]) fn(); });
     await act(async () => { await Promise.resolve(); });
   };
-  return { dom, opened, posts, render, sessionAppears };
+  // The controller publishes its first list: the store leaves `pending`.
+  const listReady = async () => {
+    phase = 'ready';
+    await act(async () => { for (const fn of [...subscribers]) fn(); });
+    await act(async () => { await Promise.resolve(); });
+  };
+  return { dom, opened, posts, render, sessionAppears, listReady };
 }
 
 test('clicking the family root while its branch is open does not snap back', async (t) => {
@@ -269,3 +278,21 @@ test('the app moving you between versions archives nothing', async (t) => {
     'a session transition is not a switch the reader asked for');
 });
 
+
+test('a session list that is still loading does not consume the restore', async (t) => {
+  // With `slots` as the only hard dependency this client can be applied before
+  // the session controller has published anything (0.1.7 boots that way). The
+  // "is it in the sidebar" check must wait for the list rather than read an empty
+  // one as "the branch is gone", which would mark the family as handled and drop
+  // the restore for the whole page load.
+  const chat = await mountChat(t, { remembered: 'session-branch', listPhase: 'pending' });
+
+  await chat.render('session-other');
+  await chat.render('session-root');
+  assert.deepEqual(chat.opened, [], 'nothing is opened while the list is still loading');
+
+  await chat.listReady();
+  await chat.render('session-other');
+  await chat.render('session-root');
+  assert.deepEqual(chat.opened, ['session-branch'], 'once the list is there, the restore still happens');
+});
