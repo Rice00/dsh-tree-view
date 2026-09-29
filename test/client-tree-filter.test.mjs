@@ -54,6 +54,9 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   // it — the signal `collectAfterSwitch` waits for.
   const retained = {};
   const listSubscribers = [];
+  // Versions brought back out through the workspace service rather than the host
+  // route, for the tests about how a collected version is reopened.
+  const unarchived = [];
   // Attempts the flaky workspace double has seen, for the retry test.
   let workspaceAttempts = 0;
   const tabClicks = [];
@@ -82,7 +85,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   const ctx = {
     get(name) {
       if (name === 'slots') return slots;
-      if (name === 'uiWorkspace' && (host === 'modern' || host === 'flaky')) {
+      if (name === 'uiWorkspace' && (host === 'modern' || host === 'flaky' || host === 'modern-unarchive')) {
         return {
           openSession: (id) => {
             // A target the client catalogue has not caught up with yet: 0.1.7's
@@ -91,6 +94,15 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
             if (host === 'flaky' && workspaceAttempts++ < 2) throw new Error('unknown session ' + id);
             workspaceOpened.push(id);
           },
+          // 0.1.7's workspace can bring a collected version back out, and doing that
+          // through the client rather than the host route is what lets the client
+          // catalogue learn the session.
+          ...(host === 'modern-unarchive' ? {
+            unarchiveSession: async (id) => {
+              unarchived.push(id);
+              retained[id] = true;
+            },
+          } : {}),
         };
       }
       if (name === 'sessions') {
@@ -201,7 +213,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   return {
     dom, cardIds, offsets, titles, links, tools, clickTool, clickCard, foldCard,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
-    worldTransform, dragFromCard, retain,
+    worldTransform, dragFromCard, retain, unarchived,
     opened, workspaceOpened, tabClicks,
   };
 }
@@ -763,4 +775,21 @@ test('a click retries while the client catalogue catches up, instead of doing no
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.deepEqual(view.workspaceOpened, ['session-fork'], 'and the retry lands on the version that was clicked');
+});
+
+test('a collected version is brought back out through the client, not behind its back', async (t) => {
+  // The host route unarchives in the registry without telling the client, and the
+  // client catalogue then keeps refusing the session — that is how the way back to
+  // a collected version silently landed on the session you were leaving. 0.1.7's
+  // workspace owns this operation and refreshes the catalogue with it.
+  const posts = [];
+  const versions = withArchived(['session-root']);
+  const view = await mountView(t, { dropEmptyForks: true }, versions, recording(posts, versions), 'session-fork', {}, 'modern-unarchive');
+
+  await view.clickCard('session-root#root');
+
+  assert.deepEqual(view.unarchived, ['session-root'], 'the client brings the version back out');
+  assert.ok(!posts.some((p) => p.action === 'activate'),
+    'and the host route is not used for it: ' + JSON.stringify(posts));
+  assert.ok(view.workspaceOpened.includes('session-root'), 'then the version is opened');
 });

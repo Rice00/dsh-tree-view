@@ -483,10 +483,30 @@ function ringFor(versions, sessionId, turn) {
 async function openVersionTarget(sessions, v) {
   if (!v || v.deleted || !sessions) return;
   if (v.archived) {
-    try {
-      await mutate({ action: 'activate', sessionId: v.sessionId });
-      treeStore.invalidate();
-    } catch (e) {}
+    // Bringing a collected version back out is a *client* operation on 0.1.7
+    // (`uiWorkspace.unarchiveSession`), and that is the whole difference: our own
+    // host route writes the archive registry behind the client's back, so the
+    // client catalogue never learns the session and `openSession` keeps refusing
+    // it — which is precisely how the way back to a collected version ended up on
+    // the session you were leaving. The host route stays as the fallback for hosts
+    // whose workspace has no unarchive of its own.
+    let unarchived = false;
+    if (typeof sessions.unarchive === 'function') {
+      try {
+        unarchived = await sessions.unarchive(v.sessionId);
+      } catch (e) {
+        console.warn('[dsh-tree-view] could not bring the version back out:', e && e.message ? e.message : e);
+      }
+    }
+    if (!unarchived) {
+      try {
+        await mutate({ action: 'activate', sessionId: v.sessionId });
+      } catch (e) {
+        // Swallowing this used to hide a click that could never work.
+        console.warn('[dsh-tree-view] could not unarchive the version through the host either:', e && e.message ? e.message : e);
+      }
+    }
+    treeStore.invalidate();
   }
   openWhenListed(sessions, v.sessionId);
 }
@@ -588,6 +608,23 @@ function sessionNavigator(ctx) {
      * nothing at all and the reader stayed on the session they were on. Retrying is
      * the whole fix; giving up loudly is the floor.
      */
+    /**
+     * Bring a collected version back out of the tree, through the client.
+     *
+     * The app owns this in 0.1.7 (`uiWorkspace.unarchiveSession`) and it also
+     * refreshes the client's own catalogue; our host route, by contrast, changes
+     * the registry without telling the client, which then keeps refusing to open a
+     * session it believes is still archived. Returns false when this host has no
+     * such method, so the caller can fall back to the route.
+     */
+    unarchive: async function (sessionId) {
+      const workspace = service('uiWorkspace');
+      if (workspace && typeof workspace.unarchiveSession === 'function') {
+        await workspace.unarchiveSession(sessionId);
+        return true;
+      }
+      return false;
+    },
     open: function (sessionId) {
       const attempt = function (left) {
         const workspace = service('uiWorkspace');
