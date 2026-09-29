@@ -482,6 +482,7 @@ function ringFor(versions, sessionId, turn) {
  */
 async function openVersionTarget(sessions, v) {
   if (!v || v.deleted || !sessions) return;
+  console.log('[dsh-tree-view] open: ' + v.sessionId + ' archived=' + v.archived + (sessions.unarchive ? ' (workspace unarchive available)' : ''));
   if (v.archived) {
     // Bringing a collected version back out is a *client* operation on 0.1.7
     // (`uiWorkspace.unarchiveSession`), and that is the whole difference: our own
@@ -599,6 +600,27 @@ function sessionNavigator(ctx) {
     list: function () {
       const sessions = service('sessions');
       return sessions && sessions.list;
+    },
+    /**
+     * The session the main view is really showing, or null when this host's list
+     * snapshot carries no retention information.
+     */
+    mainSession: function () {
+      const sessions = service('sessions');
+      const list = sessions && sessions.list;
+      if (!list || typeof list.getSnapshot !== 'function') return null;
+      const snapshot = list.getSnapshot();
+      const byId = snapshot && snapshot.byId;
+      if (!byId) return null;
+      let seen = false;
+      let first = null;
+      for (const id in byId) {
+        const entry = byId[id];
+        if (!entry || entry.retainedBy === undefined) continue;
+        seen = true;
+        if (entry.retainedBy && entry.retainedBy.length > 0 && first === null) first = id;
+      }
+      return seen ? first : null;
     },
     /**
      * Bring a collected version back out of the tree, through the client.
@@ -2403,17 +2425,24 @@ return {
       function openVersion(id) {
         const lay = layoutRef.current;
         const node = lay && lay.byId.get(id);
-        if (!node || node.deleted) return;
+        if (!node || node.deleted) { console.log('[dsh-tree-view] click: no live node for ' + id); return; }
         // The fold node is not a session; it is the shared history in one card,
         // and clicking it is how you read that history again.
         if (node.fold) { setFoldExpanded(true); return; }
-        if (!sessions) return;
+        if (!sessions) { console.log('[dsh-tree-view] click: no navigator'); return; }
         const v = versions.find(function (item) { return item.sessionId === node.sessionId; });
-        if (!v) return;
-        // A node of the version already on screen is not a switch: it only takes
-        // you back to the Chat tab and puts it at that turn. Nothing is collected
-        // and nothing is brought out.
-        if (v.sessionId === sessionId) {
+        if (!v) { console.log('[dsh-tree-view] click: ' + node.sessionId + ' is not in the payload'); return; }
+        console.log('[dsh-tree-view] click: ' + node.sessionId + ' | prop-session=' + sessionId + ' | archived=' + v.archived);
+        // "Is this the version already on screen" decides whether a click is just
+        // "take me back to the Chat tab", and the slot's own sessionId is not
+        // trustworthy enough for it: the view can keep the id it mounted with after
+        // the app has switched. Ask the app instead — the session list marks what
+        // the main view is retaining — and fall back to the prop where that signal
+        // does not exist.
+        const onScreen = sessions.mainSession ? sessions.mainSession() : null;
+        const alreadyOnScreen = onScreen !== null ? v.sessionId === onScreen : v.sessionId === sessionId;
+        if (alreadyOnScreen) {
+          console.log('[dsh-tree-view] click: already on screen (' + (onScreen !== null ? 'app says ' + onScreen : 'prop') + ') — no switch');
           showChat();
           if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
           return;
