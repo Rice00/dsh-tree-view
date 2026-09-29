@@ -57,8 +57,10 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   // Versions brought back out through the workspace service rather than the host
   // route, for the tests about how a collected version is reopened.
   const unarchived = [];
-  // Attempts the flaky workspace double has seen, for the retry test.
+  // Attempts the flaky workspace double has seen, for the retry test, and per-id
+  // refusals for the stale-navigation test.
   let workspaceAttempts = 0;
+  const workspaceRefusals = {};
   const tabClicks = [];
   t.after(async () => {
     await act(async () => root.unmount());
@@ -85,13 +87,18 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   const ctx = {
     get(name) {
       if (name === 'slots') return slots;
-      if (name === 'uiWorkspace' && (host === 'modern' || host === 'flaky' || host === 'modern-unarchive')) {
+      if (name === 'uiWorkspace' && (host === 'modern' || host === 'flaky' || host === 'slow' || host === 'modern-unarchive')) {
         return {
           openSession: (id) => {
             // A target the client catalogue has not caught up with yet: 0.1.7's
             // `resolveTarget` refuses it, and that refusal is what made a click do
-            // nothing at all.
+            // nothing at all. `slow` refuses one id a few times and then accepts it —
+            // the case where a stale retry can still land after a newer click.
             if (host === 'flaky' && workspaceAttempts++ < 2) throw new Error('unknown session ' + id);
+            if (host === 'slow') {
+              workspaceRefusals[id] = (workspaceRefusals[id] || 0) + 1;
+              if (id === 'session-fork' && workspaceRefusals[id] < 4) throw new Error('unknown session ' + id);
+            }
             workspaceOpened.push(id);
           },
           // 0.1.7's workspace can bring a collected version back out, and doing that
@@ -792,4 +799,19 @@ test('a collected version is brought back out through the client, not behind its
   assert.ok(!posts.some((p) => p.action === 'activate'),
     'and the host route is not used for it: ' + JSON.stringify(posts));
   assert.ok(view.workspaceOpened.includes('session-root'), 'then the version is opened');
+});
+
+test('a fast second click cancels the first navigation instead of being overridden by it', async (t) => {
+  // Reported as "fast clicking still lands on the new conversation": the first
+  // click's retries were still pending when the second click happened, so the stale
+  // attempt re-opened the version the reader had already left. Only the newest
+  // navigation may retry.
+  const view = await mountView(t, { dropEmptyForks: false }, VERSIONS, undefined, 'session-root', {}, 'slow');
+
+  await view.clickCard('session-fork#t16');   // refused a few times, then the manager accepts it
+  await view.clickCard('session-copy#fork');  // and the reader moves on to this one
+  await new Promise((resolve) => setTimeout(resolve, 900));
+
+  assert.deepEqual(view.workspaceOpened, ['session-copy'],
+    'only the newest navigation lands: ' + JSON.stringify(view.workspaceOpened));
 });

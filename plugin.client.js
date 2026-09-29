@@ -589,6 +589,9 @@ function collectAfterSwitch(sessions, left, target, versions) {
  * host that offers neither leaves the tree readable instead of refusing to boot.
  */
 function sessionNavigator(ctx) {
+  // Every navigation takes a token; a newer one invalidates the retries of an older
+  // one, so a stale attempt can never drag the reader back to a version they left.
+  let navigationToken = 0;
   function service(name) {
     return ctx && typeof ctx.get === 'function' ? ctx.get(name) : undefined;
   }
@@ -596,6 +599,23 @@ function sessionNavigator(ctx) {
     list: function () {
       const sessions = service('sessions');
       return sessions && sessions.list;
+    },
+    /**
+     * Bring a collected version back out of the tree, through the client.
+     *
+     * The app owns this in 0.1.7 (`uiWorkspace.unarchiveSession`) and it also
+     * refreshes the client's own catalogue; our host route, by contrast, changes the
+     * registry without telling the client, which then keeps refusing to open a
+     * session it believes is still archived. Returns false when this host has no such
+     * method, so the caller can fall back to the route.
+     */
+    unarchive: async function (sessionId) {
+      const workspace = service('uiWorkspace');
+      if (workspace && typeof workspace.unarchiveSession === 'function') {
+        await workspace.unarchiveSession(sessionId);
+        return true;
+      }
+      return false;
     },
     /**
      * Show a session, retrying while the client's session manager catches up.
@@ -607,26 +627,17 @@ function sessionNavigator(ctx) {
      * still a step behind — and the throw used to escape silently, so the click did
      * nothing at all and the reader stayed on the session they were on. Retrying is
      * the whole fix; giving up loudly is the floor.
-     */
-    /**
-     * Bring a collected version back out of the tree, through the client.
      *
-     * The app owns this in 0.1.7 (`uiWorkspace.unarchiveSession`) and it also
-     * refreshes the client's own catalogue; our host route, by contrast, changes
-     * the registry without telling the client, which then keeps refusing to open a
-     * session it believes is still archived. Returns false when this host has no
-     * such method, so the caller can fall back to the route.
+     * Only the newest navigation may retry. Click two nodes quickly and the first
+     * one's pending retries would otherwise land after the second click and drag the
+     * reader back to the version they had already left — which is exactly what
+     * "fast clicking still jumps to the new conversation" was.
      */
-    unarchive: async function (sessionId) {
-      const workspace = service('uiWorkspace');
-      if (workspace && typeof workspace.unarchiveSession === 'function') {
-        await workspace.unarchiveSession(sessionId);
-        return true;
-      }
-      return false;
-    },
     open: function (sessionId) {
+      const token = ++navigationToken;
       const attempt = function (left) {
+        // Superseded by a later click: this navigation is stale, drop it.
+        if (token !== navigationToken) return false;
         const workspace = service('uiWorkspace');
         if (workspace && typeof workspace.openSession === 'function') {
           try {
