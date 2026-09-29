@@ -193,6 +193,9 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   // to come from the host rather than from this component's props: the view is
   // remounted on a switch, so anything kept in a ref dies with it.
   const retain = async (id) => {
+    // Exclusive: the main view retains one session at a time, and `mainSession()`
+    // reads the first retained entry, so keeping stale ids would misreport it.
+    for (const key of Object.keys(retained)) delete retained[key];
     retained[id] = true;
     await act(async () => { for (const fn of [...listSubscribers]) fn(); });
     await act(async () => { await Promise.resolve(); });
@@ -816,4 +819,22 @@ test('a fast second click cancels the first navigation instead of being overridd
 
   assert.ok(view.workspaceOpened.length >= 1 && view.workspaceOpened.every((s) => s === 'session-copy'),
     'only the newest navigation lands (no stale fork): ' + JSON.stringify(view.workspaceOpened));
+});
+
+test('the Chat tab opens only once the app is on the version you clicked', async (t) => {
+  // Reported: "it flashes the new conversation, then jumps to the target". The Chat
+  // tab used to be flipped in the click's own tick, so the conversation area showed
+  // the session being left until the switch landed.
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root');
+  await view.retain('session-root');
+  assert.deepEqual(view.tabClicks, [], 'nothing switched yet');
+
+  await view.clickCard('session-fork#t16');
+  assert.deepEqual(view.tabClicks, [], 'and nothing while the switch is in flight');
+
+  await view.retain('session-fork');   // the app lands on the target
+  for (let i = 0; i < 30 && view.tabClicks.length === 0; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(view.tabClicks.length >= 1, 'the Chat tab opens once the target is on screen');
 });

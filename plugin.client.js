@@ -596,31 +596,52 @@ function sessionNavigator(ctx) {
   function service(name) {
     return ctx && typeof ctx.get === 'function' ? ctx.get(name) : undefined;
   }
+  /**
+   * The session the main view is really showing, or null when this host's list
+   * snapshot carries no retention information.
+   */
+  function mainSessionId() {
+    const sessions = service('sessions');
+    const list = sessions && sessions.list;
+    if (!list || typeof list.getSnapshot !== 'function') return null;
+    const snapshot = list.getSnapshot();
+    const byId = snapshot && snapshot.byId;
+    if (!byId) return null;
+    let seen = false;
+    let first = null;
+    for (const id in byId) {
+      const entry = byId[id];
+      if (!entry || entry.retainedBy === undefined) continue;
+      seen = true;
+      if (entry.retainedBy && entry.retainedBy.length > 0 && first === null) first = id;
+    }
+    return seen ? first : null;
+  }
   return {
     list: function () {
       const sessions = service('sessions');
       return sessions && sessions.list;
     },
+    mainSession: mainSessionId,
     /**
-     * The session the main view is really showing, or null when this host's list
-     * snapshot carries no retention information.
+     * Run `callback` once the main view really shows `sessionId`.
+     *
+     * Clicking a node also opens the Chat tab, and flipping to it in the click's own
+     * tick showed the session you were leaving for a moment — the report "it flashes
+     * the new conversation and then jumps to the target". A host that does not
+     * report retention cannot be asked, so it keeps the immediate behaviour rather
+     * than guessing; the callback always runs, at the latest after three seconds.
      */
-    mainSession: function () {
-      const sessions = service('sessions');
-      const list = sessions && sessions.list;
-      if (!list || typeof list.getSnapshot !== 'function') return null;
-      const snapshot = list.getSnapshot();
-      const byId = snapshot && snapshot.byId;
-      if (!byId) return null;
-      let seen = false;
-      let first = null;
-      for (const id in byId) {
-        const entry = byId[id];
-        if (!entry || entry.retainedBy === undefined) continue;
-        seen = true;
-        if (entry.retainedBy && entry.retainedBy.length > 0 && first === null) first = id;
-      }
-      return seen ? first : null;
+    whenMain: function (sessionId, callback) {
+      const current = mainSessionId();
+      if (current === null || current === sessionId) { callback(); return; }
+      let tries = 0;
+      const poll = function () {
+        tries += 1;
+        if (mainSessionId() === sessionId || tries >= 25) { callback(); return; }
+        setTimeout(poll, 120);
+      };
+      setTimeout(poll, 120);
     },
     /**
      * Bring a collected version back out of the tree, through the client.
@@ -2470,8 +2491,15 @@ return {
         // first is what made a second click land on the session you had just left).
         if (v.archived === true) collectAfterSwitch(sessions, sessionId, v.sessionId, versions);
         openVersionTarget(sessions, v);
-        showChat();
-        if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
+        // Open the Chat tab once the app is really on the target. Flipping to it in
+        // this same tick showed the session you were leaving until the switch landed
+        // — the report "it flashes the new conversation, then jumps to the target".
+        const reveal = function () {
+          showChat();
+          if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
+        };
+        if (sessions.whenMain) sessions.whenMain(v.sessionId, reveal);
+        else reveal();
       }
 
       /**
