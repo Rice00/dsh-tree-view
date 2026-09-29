@@ -159,10 +159,10 @@ What that means for the next change:
 The host is deliberately outside that promise. `engines.dsh` names a range that
 has been verified, never one that merely looks compatible, so npm cannot hand an
 unverified host to a user as a supported environment. CI's `official-host` job
-runs the acceptance against every host line in that range (`0.1.5-rc.2` and
-`0.1.7-rc.1` at the time of writing; the matrix is in the workflow). When a new
-host line ships, add it to that matrix first, watch it pass, and only then change
-the range here and in `package.json`.
+runs the acceptance against every host line in that range (`0.1.5-rc.2`,
+`0.1.7-rc.1` and `0.2.0-rc.1` at the time of writing; the matrix is in the
+workflow). When a new host line ships, add it to that matrix first, watch it pass,
+and only then change the range here and in `package.json`.
 
 Two rules keep a host change from taking the plugin offline:
 

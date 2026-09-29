@@ -49,8 +49,10 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         # Every host line the plugin claims to support is acceptance-tested, so a
         # host that moves an API it depends on shows up here rather than in a
-        # user's panel. 0.1.7 moved session navigation off the session service.
-        dsh: ['0.1.5-rc.2', '0.1.7-rc.1']
+        # user's panel. 0.1.7 moved session navigation off the session service;
+        # 0.2.0-rc.1 keeps that shape, and its workspace archive API is what the
+        # tree's collect and unarchive go through.
+        dsh: ['0.1.5-rc.2', '0.1.7-rc.1', '0.2.0-rc.1']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

@@ -119,10 +119,10 @@ Please install the DSH plugin dsh-tree-view:
 |---|---|
 | `0.1.5-rc.2` | Verified — end-to-end acceptance: edit, retry, reading branches back after a restart, nested markers and image retention |
 | `0.1.7-rc.1` | Verified — the same host-side acceptance; the client speaks both generations of the session-navigation API |
-| `0.1.5-rc.3` and other `0.1.x` | Inside the same `engines` range, not verified on its own |
-| `0.2.x` | Outside the range — try it, and please open an issue if something breaks |
+| `0.2.0-rc.1` | Verified — the same host-side acceptance; session navigation is still the 0.1.7 generation, and archiving goes through the workspace registry |
+| `0.1.5-rc.3`, other `0.1.x` and `0.2.x` | Inside the same `engines` range, not verified on its own |
 
-When the host moves to a new line, run the acceptance in CI's host matrix first, then change the range — that matrix lists exactly the two verified versions above.
+When the host moves to a new line, run the acceptance in CI's host matrix first, then change the range — that matrix lists exactly the three verified versions above.
 
 **The client stops for one thing only**: `slots` (without it there is nothing to register into). Everything else is taken on a "use it if it is there" basis: both generations of session navigation are understood (0.1.7's `uiWorkspace.openSession` and the older `sessions.open`), the session list and the locale pack come in through optional injection, and the subagent catalogue is read from either generation's field. A host that renames or drops one of those loses that one ability; it does not make the plugin install itself invisibly.
 
@@ -150,7 +150,7 @@ Folding exists for that: the threshold can be set to Never, and any run can be f
 Yes. They are history-seeded sessions too, so the plugin derives the fork point from the seed length and draws them as a version on that line. DSH itself limits that button to the last message of a completed turn; the plugin does not change that.
 
 **Which DSH versions are supported?**
-See "Versions and compatibility". `engines.dsh` declares `>=0.1.5-rc.2 <0.1.6-0`, and `0.1.5-rc.2` is the one verified inside it. Restart DSH after updating the plugin.
+See "Versions and compatibility". `engines.dsh` declares `>=0.1.5-rc.2 <0.3.0-0`, and the versions verified inside it are `0.1.5-rc.2`, `0.1.7-rc.1` and `0.2.0-rc.1`. Restart DSH after updating the plugin.
 
 ## Settings
 
