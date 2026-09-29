@@ -657,6 +657,21 @@ function sessionNavigator(ctx) {
      */
     open: function (sessionId) {
       const token = ++navigationToken;
+      const reinforce = function () {
+        // One idempotent re-issue after the dust settles. 0.1.7's right sidebar
+        // re-syncs its retained session views when the main session changes, and a
+        // stale sync can prune the freshly-created view while it is still opening
+        // — the console reports "Sidebar Session opening failed: … is released" and
+        // the main view never lands on the target. openSession to the same target is
+        // harmless, so a second call after the race re-establishes it. A newer click
+        // bumps the token and cancels this.
+        if (token !== navigationToken) return;
+        const workspace = service('uiWorkspace');
+        if (workspace && typeof workspace.openSession === 'function') {
+          try { workspace.openSession(sessionId); }
+          catch (e) { console.warn('[dsh-tree-view] reinforce failed for ' + sessionId + ': ' + (e && e.message ? e.message : e)); }
+        }
+      };
       const attempt = function (left) {
         // Superseded by a later click: this navigation is stale, drop it.
         if (token !== navigationToken) return false;
@@ -664,6 +679,7 @@ function sessionNavigator(ctx) {
         if (workspace && typeof workspace.openSession === 'function') {
           try {
             workspace.openSession(sessionId);
+            setTimeout(reinforce, 400);
             return true;
           } catch (e) {
             if (left > 0) { setTimeout(function () { attempt(left - 1); }, 150); return false; }
@@ -675,6 +691,7 @@ function sessionNavigator(ctx) {
         if (sessions && typeof sessions.open === 'function') {
           try {
             sessions.open(sessionId);
+            setTimeout(reinforce, 400);
             return true;
           } catch (e) {
             if (left > 0) { setTimeout(function () { attempt(left - 1); }, 150); return false; }

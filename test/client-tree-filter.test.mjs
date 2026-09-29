@@ -730,7 +730,8 @@ test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions
   // fails to boot — that is how the whole plugin went missing on 0.1.7.
   const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root', {}, 'modern');
   await view.clickCard('session-fork#t16');
-  assert.deepEqual(view.workspaceOpened, ['session-fork'], 'the workspace service opens the version');
+  assert.ok(view.workspaceOpened.length >= 1 && view.workspaceOpened.every((s) => s === 'session-fork'),
+    'the workspace service opens the version (open plus its idempotent reinforce): ' + JSON.stringify(view.workspaceOpened));
   assert.deepEqual(view.opened, [], 'the removed sessions.open is never called');
 });
 
@@ -781,7 +782,8 @@ test('a click retries while the client catalogue catches up, instead of doing no
   for (let i = 0; i < 20 && view.workspaceOpened.length === 0; i++) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  assert.deepEqual(view.workspaceOpened, ['session-fork'], 'and the retry lands on the version that was clicked');
+  assert.ok(view.workspaceOpened.length >= 1 && view.workspaceOpened.every((s) => s === 'session-fork'),
+    'and the retry lands on the version that was clicked: ' + JSON.stringify(view.workspaceOpened));
 });
 
 test('a collected version is brought back out through the client, not behind its back', async (t) => {
@@ -812,6 +814,6 @@ test('a fast second click cancels the first navigation instead of being overridd
   await view.clickCard('session-copy#fork');  // and the reader moves on to this one
   await new Promise((resolve) => setTimeout(resolve, 900));
 
-  assert.deepEqual(view.workspaceOpened, ['session-copy'],
-    'only the newest navigation lands: ' + JSON.stringify(view.workspaceOpened));
+  assert.ok(view.workspaceOpened.length >= 1 && view.workspaceOpened.every((s) => s === 'session-copy'),
+    'only the newest navigation lands (no stale fork): ' + JSON.stringify(view.workspaceOpened));
 });
