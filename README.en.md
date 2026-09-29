@@ -149,6 +149,9 @@ Folding exists for that: the threshold can be set to Never, and any run can be f
 **Do conversations branched with DSH's own button show up in the tree?**
 Yes. They are history-seeded sessions too, so the plugin derives the fork point from the seed length and draws them as a version on that line. DSH itself limits that button to the last message of a completed turn; the plugin does not change that.
 
+**Where can I see what the tree itself decided?**
+The plugin writes its client-side decision lines to a day-scoped file: `~/.dsh/storages/tree-view/logs/tree-view-YYYY-MM-DD.log`. It holds which version each click chose, every navigation attempt and its retries, and the renderer's errors — including the ones the app itself logs. Pasting a few of those lines into an issue goes much further than describing what you saw.
+
 **Which DSH versions are supported?**
 See "Versions and compatibility". `engines.dsh` declares `>=0.1.5-rc.2 <0.3.0-0`, and the versions verified inside it are `0.1.5-rc.2`, `0.1.7-rc.1` and `0.2.0-rc.1`. Restart DSH after updating the plugin.
 
