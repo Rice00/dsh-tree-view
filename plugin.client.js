@@ -905,6 +905,12 @@ const GROUP_PAD = 14;
 const GROUP_HEAD = 20;
 const SLOT_X = 206;
 const SLOT_Y = 132;
+// The birth animation is a cue, not a curtain: "this one branch grew out of that
+// card" reads on one or two new nodes. Past this many at once — a first open, a
+// fold coming undone — the nodes are placed outright instead, because animating a
+// crowd means writing every card and every edge on every frame until it settles,
+// which is exactly the stall a large tree hit on open.
+const BIRTH_ANIMATION_CAP = 12;
 
 /**
  * Project conversation family versions into a turn-level branching tree.
@@ -2226,6 +2232,9 @@ return {
       const promoteTimerRef = React.useRef(0);
       const rasterFrameRef = React.useRef(0);
       const rasterScaleRef = React.useRef(0);
+      // Whether the world layer is up. A gesture raises it; a fit raises it in
+      // idle time instead (see schedulePromotion).
+      const worldPromotedRef = React.useRef(false);
       // Measured card and group-name heights, refreshed once per layout (see
       // measureHeights): the frame loop must not read layout itself.
       const cardHeights = React.useRef(new Map());
@@ -2332,34 +2341,69 @@ return {
         const el = worldRef.current;
         const view = viewRef.current;
         if (el) {
-          const zoomed = rasterScaleRef.current !== view.scale;
-          el.style.willChange = 'transform';
-          if (zoomed) {
-            rasterScaleRef.current = view.scale;
-            if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
-            promoteTimerRef.current = setTimeout(function () {
-              promoteTimerRef.current = 0;
-              const node = worldRef.current;
-              if (!node) return;
-              node.style.willChange = '';
-              if (rasterFrameRef.current) cancelAnimationFrame(rasterFrameRef.current);
-              // Two frames, not one: the first is when the browser paints the world
-              // unpromoted at the scale on screen (which is what makes the text
-              // sharp), the second is where the layer comes back on top of that
-              // fresh paint. Re-promoting in the same frame can land before the
-              // paint and leave the stale raster in place.
-              rasterFrameRef.current = requestAnimationFrame(function () {
+          // Only a world that is already a layer gets the refresh dance, and only
+          // a gesture (or the idle promotion below) raises that layer. Promoting
+          // during the first fit made the browser rasterise the entire tree into
+          // one layer before anything moved — on a large family that raster is
+          // enormous, and paying for it is the stall the reader feels as "opening
+          // the tree froze for a moment".
+          if (worldPromotedRef.current) {
+            const zoomed = rasterScaleRef.current !== view.scale;
+            el.style.willChange = 'transform';
+            if (zoomed) {
+              rasterScaleRef.current = view.scale;
+              if (promoteTimerRef.current) clearTimeout(promoteTimerRef.current);
+              promoteTimerRef.current = setTimeout(function () {
+                promoteTimerRef.current = 0;
+                const node = worldRef.current;
+                if (!node) return;
+                node.style.willChange = '';
+                if (rasterFrameRef.current) cancelAnimationFrame(rasterFrameRef.current);
+                // Two frames, not one: the first is when the browser paints the world
+                // unpromoted at the scale on screen (which is what makes the text
+                // sharp), the second is where the layer comes back on top of that
+                // fresh paint. Re-promoting in the same frame can land before the
+                // paint and leave the stale raster in place.
                 rasterFrameRef.current = requestAnimationFrame(function () {
-                  rasterFrameRef.current = 0;
-                  const again = worldRef.current;
-                  if (again) again.style.willChange = 'transform';
+                  rasterFrameRef.current = requestAnimationFrame(function () {
+                    rasterFrameRef.current = 0;
+                    const again = worldRef.current;
+                    if (again) again.style.willChange = 'transform';
+                  });
                 });
-              });
-            }, 400);
+              }, 400);
+            }
           }
           el.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.scale + ')';
         }
         positionGroupNames();
+      }
+
+      /**
+       * Raise the world layer. `rasterScaleRef` is set with it, because the raster
+       * the browser is about to draw is the one at the scale on screen right now —
+       * which is what keeps the next pan from triggering a refresh it does not
+       * need, while a zoom still does.
+       */
+      function promoteWorld() {
+        if (worldPromotedRef.current) return;
+        worldPromotedRef.current = true;
+        rasterScaleRef.current = viewRef.current.scale;
+        const el = worldRef.current;
+        if (el) el.style.willChange = 'transform';
+      }
+
+      /**
+       * Have the layer up before the reader reaches for the canvas, without paying
+       * for its raster during the first paint: the raster happens in idle time.
+       * A gesture that arrives first promotes immediately instead.
+       */
+      function schedulePromotion() {
+        if (worldPromotedRef.current) return;
+        const g = realGlobal();
+        const run = function () { promoteWorld(); };
+        if (g && typeof g.requestIdleCallback === 'function') g.requestIdleCallback(run, { timeout: 400 });
+        else setTimeout(run, 150);
       }
 
       /**
@@ -2417,10 +2461,25 @@ return {
        * the edge anchor, group-name height for the sticky clamp). Reading them
        * from inside the animation loop is what makes a canvas of 60 cards stutter:
        * each `offsetHeight` read after a style write invalidates layout again.
+       *
+       * It waits for the paint, too. Reading N card heights forces a layout, and
+       * doing that in the frame that is about to draw the tree delays the very
+       * first thing the reader sees — which is the rest of a large tree's opening
+       * stall. Until this lands the edge anchors use the nominal card height, so
+       * the cost of waiting is one frame of a slightly wrong anchor.
        */
+      function cancelMeasure() {
+        const handle = measureRef.current;
+        if (!handle) return;
+        measureRef.current = 0;
+        const g = realGlobal();
+        if (g && typeof g.cancelIdleCallback === 'function') { try { g.cancelIdleCallback(handle); } catch (e) {} }
+        cancelAnimationFrame(handle);
+      }
+
       function measureHeights() {
-        if (measureRef.current) cancelAnimationFrame(measureRef.current);
-        measureRef.current = requestAnimationFrame(function () {
+        cancelMeasure();
+        const run = function () {
           measureRef.current = 0;
           cardEls.current.forEach(function (el, id) {
             const h = el && el.offsetHeight;
@@ -2431,7 +2490,17 @@ return {
             entry.nameHeight = h || entry.nameHeight || 20;
           });
           renderFrame();
-        });
+        };
+        const g = realGlobal();
+        if (g && typeof g.requestIdleCallback === 'function') {
+          measureRef.current = g.requestIdleCallback(run, { timeout: 250 });
+        } else {
+          // Two frames, not one: the first runs before this paint, the second
+          // after it — which is the whole point of deferring this pass.
+          measureRef.current = requestAnimationFrame(function () {
+            measureRef.current = requestAnimationFrame(run);
+          });
+        }
       }
 
       function kick() {
@@ -2481,19 +2550,29 @@ return {
         applyView();
       }
 
-      // Retarget springs on every layout change; new cards are born at their
-      // parent's position so they visibly grow out of it.
+      // Retarget springs on every layout change; a *few* new cards are born at
+      // their parent's position so they visibly grow out of it. A crowd of them —
+      // the first fill of a family, or a fold coming undone — is placed outright
+      // instead: the animation writes every card and every edge on every frame for
+      // as long as it settles, and that is the stall a large tree hit on open. The
+      // cards already render at their settled position (the JSX falls back to the
+      // layout position), so skipping the animation is also invisible.
       React.useEffect(function () {
         const lay = layout;
+        const started = typeof performance !== 'undefined' && performance.now ? performance.now() : 0;
         const alive = new Set();
+        let added = 0;
+        lay.pos.forEach(function (_, id) { if (!springs.current.has(id)) added++; });
+        const born = !fittedRef.current ? 0 : added;   // a first fill always lands outright
+        const animateBirth = born > 0 && born <= BIRTH_ANIMATION_CAP;
         lay.pos.forEach(function (p, id) {
           alive.add(id);
           let s = springs.current.get(id);
           if (!s) {
             const n = lay.byId.get(id);
-            const pp = n && n.parentId ? lay.pos.get(n.parentId) : null;
-            const born = pp || p;
-            springs.current.set(id, { x: born.x, y: born.y, vx: 0, vy: 0, tx: p.x, ty: p.y });
+            const pp = animateBirth && n && n.parentId ? lay.pos.get(n.parentId) : null;
+            const from = pp || p;
+            springs.current.set(id, { x: from.x, y: from.y, vx: 0, vy: 0, tx: p.x, ty: p.y });
           } else {
             s.tx = p.x;
             s.ty = p.y;
@@ -2511,12 +2590,20 @@ return {
           fitView();
         }
         applyView();
-        kick();
-        // Card and group-name heights are only needed by the edge paths and the
-        // sticky group names. Measuring them here — once per layout, after the
-        // browser has laid the cards out — keeps those reads out of the frame
-        // loop, where a forced layout per edge was the other half of the cost.
+        // Only a layout that animates needs the frame loop. A settled fill is
+        // already drawn correctly by the render that produced it, and the measured
+        // heights — which the edge anchors use — arrive with measureHeights below.
+        if (animateBirth) kick();
+        // And the layer waits for a tree to exist: promoting an empty world would
+        // just raise it before the first card paints, which is the cost this was
+        // meant to move out of the way.
+        if (lay.pos.size > 0) schedulePromotion();
         measureHeights();
+        if (started) {
+          remoteLog('info', 'layout: ' + lay.pos.size + ' nodes, ' + lay.edges.length + ' edges, +' + added
+            + ' new, ' + Math.round(performance.now() - started) + 'ms, '
+            + (animateBirth ? 'animating ' + born : 'settled outright'));
+        }
         return function () {
           if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
         };
@@ -2528,6 +2615,7 @@ return {
         if (!el) return undefined;
         const onWheel = function (ev) {
           ev.preventDefault();
+          promoteWorld();
           const view = viewRef.current;
           const rect = el.getBoundingClientRect();
           const mx = ev.clientX - rect.left;
@@ -2772,6 +2860,9 @@ return {
           d.moved = true;
           // Whatever the press started on, from here it is a pan.
           if (graphRef.current) graphRef.current.setAttribute('data-panning', '');
+          // The gesture is what justifies the layer: raise it now, so this pan is
+          // a transform the GPU can do, rather than a repaint per frame.
+          promoteWorld();
         }
         if (!d.moved) return;
         viewRef.current.x = d.ox + dx;
