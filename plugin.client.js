@@ -337,6 +337,54 @@ function useStyle() {
 const MAX_CACHED_SESSIONS = 500;
 const MAX_CACHED_ROOTS = 50;
 
+// The host builds a tree payload by reading and parsing every version's log, which
+// on this conversation's family measured 3.7-5.2 seconds — and a client that has
+// never loaded that family sits on an empty canvas for exactly that long. So the
+// last payload is kept in storage and painted at once, then replaced by the fresh
+// one when it arrives. A second of a stale archive flag or `current` mark is a fair
+// price for not staring at nothing; the refresh follows immediately.
+const TREE_CACHE_KEY = 'dsh-tree-view:tree:';
+const TREE_CACHE_INDEX = 'dsh-tree-view:tree:index';
+const TREE_CACHE_LIMIT = 6;
+const TREE_CACHE_MAX_CHARS = 500000;
+// How long a painted tree is trusted before it is refreshed in the background. The
+// host's rebuild is expensive (see above), and anything the reader would notice —
+// a new version, a collected branch — invalidates this cache instead.
+const TREE_REVALIDATE_MS = 60000;
+
+function rememberTree(sessionId, versions, archiveSupport) {
+  const g = realGlobal();
+  if (!g || !g.localStorage || !sessionId) return;
+  try {
+    const body = JSON.stringify({ at: Date.now(), versions: versions, archiveSupport: archiveSupport ?? null });
+    if (body.length > TREE_CACHE_MAX_CHARS) return;
+    g.localStorage.setItem(TREE_CACHE_KEY + sessionId, body);
+    const raw = g.localStorage.getItem(TREE_CACHE_INDEX);
+    const index = raw ? JSON.parse(raw) : [];
+    const keep = [sessionId].concat(index.filter(function (id) { return id !== sessionId; })).slice(0, TREE_CACHE_LIMIT);
+    for (const id of index) {
+      if (keep.indexOf(id) === -1) g.localStorage.removeItem(TREE_CACHE_KEY + id);
+    }
+    g.localStorage.setItem(TREE_CACHE_INDEX, JSON.stringify(keep));
+  } catch (e) {
+    // A full or blocked store costs us the head start, never the tree.
+  }
+}
+
+function recallTree(sessionId) {
+  const g = realGlobal();
+  if (!g || !g.localStorage || !sessionId) return null;
+  try {
+    const raw = g.localStorage.getItem(TREE_CACHE_KEY + sessionId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.versions)) return null;
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
 // High-performance family-aware tree cache with zero-flicker Stale-While-Revalidate.
 const treeStore = {
   bySession: new Map(),
@@ -404,6 +452,9 @@ const treeStore = {
     }
     this.bySession.set(sessionId, entry);
     this._prune();
+    // Remembered so the next cold open of this family paints at once (see the
+    // cache note above); the host's fresher answer replaces it moments later.
+    rememberTree(sessionId, versions, entry.archiveSupport);
     this.notify();
   },
 
@@ -439,6 +490,16 @@ const treeStore = {
       this.bySession.set(sessionId, { versions: null, loading: true, error: null, updatedAt: 0 });
     }
 
+    // Nothing to show and the host needs seconds to answer: paint what this family
+    // looked like last time. Its own timestamp is used so the answer on its way
+    // still counts as newer and replaces this.
+    if (!existing || !existing.versions) {
+      const remembered = recallTree(sessionId);
+      if (remembered) {
+        this.setTree(sessionId, remembered.versions, remembered.at, remembered.archiveSupport);
+      }
+    }
+
     const self = this;
     const promise = (async function () {
       try {
@@ -471,7 +532,12 @@ const treeStore = {
     const entry = this.bySession.get(sessionId);
     if (!entry || !entry.versions) {
       this.load(sessionId);
-    } else if (Date.now() - (entry.updatedAt || 0) > 8000 && !entry.loading) {
+    } else if (Date.now() - (entry.updatedAt || 0) > TREE_REVALIDATE_MS && !entry.loading) {
+      // Background revalidation. This is deliberately unhurried: the host rebuilds
+      // the whole payload (3.7-5.2 seconds on a large family), so asking every few
+      // seconds burned host CPU for nothing — the canvas is already painted, and a
+      // new version arrives through a session-list change, which invalidates this
+      // cache outright rather than waiting for the interval.
       this.load(sessionId);
     }
   },

@@ -21,7 +21,7 @@ const VERSIONS = [
   { sessionId: 'session-fork', parentSessionId: 'session-root', createdAt: 3, forkTurn: 15, turns: FORK_TURNS },
 ];
 
-async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId = 'session-root', catalogue = {}, host = 'legacy') {
+async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId = 'session-root', catalogue = {}, host = 'legacy', seed = null) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
     url: 'https://tree-view.test/',
     pretendToBeVisual: true,
@@ -33,6 +33,9 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   const stored = Object.assign({ rememberPath: true, stopOnEdit: true, dropEmptyForks: true, foldSharedAt: 0 }, prefs);
   if (stored.foldSharedAt === 'default') delete stored.foldSharedAt;
   dom.window.localStorage.setItem('dsh-tree-view:prefs', JSON.stringify(stored));
+  // Storage the test wants already in place before the plugin loads: the cached
+  // tree payload a previous visit would have left behind.
+  if (seed) for (const [key, value] of Object.entries(seed)) dom.window.localStorage.setItem(key, value);
   dom.window.fetch = fetchImpl ?? (async () => ({ ok: true, json: async () => ({ versions }) }));
   const previous = new Map();
   const browserErrors = [];
@@ -849,4 +852,34 @@ test('a click is logged to the host through the log action', async (t) => {
   assert.ok(logPosts.length >= 1, 'a log post reaches the host: ' + JSON.stringify(posts.map((p) => p.action)));
   const messages = logPosts.flatMap((p) => p.entries.map((e) => e.message)).join(' ');
   assert.ok(/click/.test(messages), 'the click decision is logged: ' + messages);
+});
+
+test('a cold open paints the last tree at once, then the host answer replaces it', async (t) => {
+  // The host rebuilds this payload by reading every version's log — 3.7 to 5.2
+  // seconds on this conversation's family — and a client that has never loaded the
+  // family showed an empty canvas for that whole time. What it saw last time is
+  // painted immediately instead, and the fresh answer takes over when it lands.
+  const remembered = JSON.stringify({ at: Date.now() - 60000, versions: VERSIONS.slice(0, 1), archiveSupport: null });
+  let calls = 0;
+  const slowHost = async () => {
+    calls++;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return { ok: true, json: async () => ({ versions: VERSIONS }) };
+  };
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, slowHost, 'session-root', {}, 'legacy', {
+    'dsh-tree-view:tree:session-root': remembered,
+  });
+
+  // A tick for the render the hydration triggers, still far inside the host's
+  // 80ms: what matters is that the canvas is not empty while the host works.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const atOnce = view.cardIds().length;
+  assert.ok(atOnce > 0, 'the remembered tree is on the canvas before the host answers');
+  assert.equal(calls, 1, 'and the host is still asked for the fresh one');
+
+  for (let i = 0; i < 20 && view.cardIds().length <= atOnce; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.ok(view.cardIds().length > atOnce,
+    'the host answer replaces what was remembered: ' + atOnce + ' -> ' + view.cardIds().length);
 });
