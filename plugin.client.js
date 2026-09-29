@@ -911,6 +911,9 @@ const SLOT_Y = 132;
 // crowd means writing every card and every edge on every frame until it settles,
 // which is exactly the stall a large tree hit on open.
 const BIRTH_ANIMATION_CAP = 12;
+// Below this scale the tree is an overview: cards are thumbnails, so their blurred
+// shadows and their subtitles are dropped (see the `data-far` rules in the sheet).
+const FAR_SCALE = 0.5;
 
 /**
  * Project conversation family versions into a turn-level branching tree.
@@ -1446,6 +1449,17 @@ const CSS = [
   // literally the open session gets one extra ring so the exact spot is findable.
   '.mtx-card[data-current]{border-color:var(--mtx-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--mtx-accent) 55%,transparent),0 6px 22px color-mix(in srgb,var(--mtx-accent) 22%,transparent)}',
   '.mtx-card[data-head]{box-shadow:0 0 0 2px var(--mtx-accent),0 8px 26px color-mix(in srgb,var(--mtx-accent) 34%,transparent)}',
+  // Level of detail at overview scale. Scaled to fit, a card is a thumbnail: its
+  // blurred shadow is sub-pixel and its subtitle is unreadable, and those two were
+  // the whole cost of painting a large family — measured on a 73-card tree, the
+  // reveal frame went from 132ms to 68ms by dropping the shadow, and under the
+  // long-frame threshold with the subtitle gone as well. The rings come back as
+  // spread-only shadows, because "where am I" has to survive the overview and a
+  // ring with no blur costs almost nothing.
+  '.mtx-graph[data-far] .mtx-card{box-shadow:none;transition:none}',
+  '.mtx-graph[data-far] .mtx-card[data-current]{box-shadow:0 0 0 1px color-mix(in srgb,var(--mtx-accent) 55%,transparent)}',
+  '.mtx-graph[data-far] .mtx-card[data-head]{box-shadow:0 0 0 2px var(--mtx-accent)}',
+  '.mtx-graph[data-far] .mtx-card-sub{display:none}',
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px var(--mtx-shadow-strong);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
@@ -2235,6 +2249,9 @@ return {
       // Whether the world layer is up. A gesture raises it; a fit raises it in
       // idle time instead (see schedulePromotion).
       const worldPromotedRef = React.useRef(false);
+      // The canvas box, kept by a ResizeObserver so the per-frame sticky clamp and
+      // the fit never have to read layout themselves.
+      const graphSizeRef = React.useRef({ w: 0, h: 0 });
       // Measured card and group-name heights, refreshed once per layout (see
       // measureHeights): the frame loop must not read layout itself.
       const cardHeights = React.useRef(new Map());
@@ -2376,6 +2393,17 @@ return {
           }
           el.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.scale + ')';
         }
+        // Overview level of detail. Toggled only when it changes: this writes to
+        // the canvas, and doing it every frame would recalculate style for every
+        // card on every pan.
+        const graph = graphRef.current;
+        if (graph && typeof graph.setAttribute === 'function') {
+          const far = view.scale < FAR_SCALE;
+          if (far !== graph.hasAttribute('data-far')) {
+            if (far) graph.setAttribute('data-far', '');
+            else graph.removeAttribute('data-far');
+          }
+        }
         positionGroupNames();
       }
 
@@ -2418,9 +2446,14 @@ return {
       function positionGroupNames() {
         const graphEl = graphRef.current;
         const view = viewRef.current;
-        if (!graphEl || graphEl.clientHeight === 0) return;
+        if (!graphEl) return;
+        // The canvas height comes from the ResizeObserver rather than a read here:
+        // this runs on every pan frame, and reading `clientHeight` after the
+        // transform was just written forces a layout each frame.
+        const height = graphSizeRef.current.h || graphEl.clientHeight || 0;
+        if (height === 0) return;
         const visibleTop = (-view.y) / view.scale;
-        const visibleBottom = visibleTop + graphEl.clientHeight / view.scale;
+        const visibleBottom = visibleTop + height / view.scale;
         groupNameEls.current.forEach(function (entry) {
           const el = entry.el;
           if (!el) return;
@@ -2539,8 +2572,9 @@ return {
           bot = Math.max(bot, p.y + 90);
         });
         if (lo === Infinity) { lo = 0; hi = CARD_W; }
-        const w = el.clientWidth || 600;
-        const h = el.clientHeight || 400;
+        const size = graphSizeRef.current;
+        const w = size.w || el.clientWidth || 600;
+        const h = size.h || el.clientHeight || 400;
         const scale = Math.min(1, (w - 70) / Math.max(1, hi - lo), (h - 70) / bot);
         viewRef.current = {
           x: (w - (hi - lo) * scale) / 2 - lo * scale,
@@ -2608,6 +2642,27 @@ return {
           if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
         };
       }, [layout]);
+
+      // Keep the canvas box without reading it. The fit needs it once per fit, but
+      // the sticky group-name clamp needs it on every pan frame, and a geometry read
+      // there forces a layout per frame. A ResizeObserver hands us the number
+      // instead; where there is none (jsdom, an older renderer) the callers fall
+      // back to reading.
+      React.useEffect(function () {
+        const el = graphRef.current;
+        if (!el) return undefined;
+        const remember = function () {
+          graphSizeRef.current = {
+            w: el.clientWidth || el.offsetWidth || 0,
+            h: el.clientHeight || el.offsetHeight || 0,
+          };
+        };
+        remember();
+        if (typeof ResizeObserver !== 'function') return undefined;
+        const observer = new ResizeObserver(remember);
+        observer.observe(el);
+        return function () { observer.disconnect(); };
+      }, []);
 
       // Wheel zoom around the pointer (non-passive so we may preventDefault).
       React.useEffect(function () {

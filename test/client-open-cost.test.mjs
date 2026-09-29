@@ -75,3 +75,33 @@ test('the layer is raised in idle time, and only once a tree exists', () => {
   assert.match(code, /rasterScaleRef\.current = viewRef\.current\.scale;/,
     'promoting records the scale the raster was drawn at, so the next pan needs no refresh');
 });
+
+test('an overview drops what cannot be seen at that scale', () => {
+  // Measured in the running app on a 73-card family: hiding every card still left a
+  // ~54ms reveal frame (that part is the host's own tab switch), and the tree's own
+  // share was almost entirely the cards' blurred shadows and their subtitles — both
+  // sub-pixel at the scale a fit lands on. Dropping them took the cold reveal from
+  // 132ms to 84ms on the same machine.
+  assert.match(code, /const FAR_SCALE = 0\.5;/, 'the overview threshold is a named constant');
+  assert.ok(bundle.includes('.mtx-graph[data-far] .mtx-card{box-shadow:none'), 'the blurred shadow is dropped in the overview');
+  assert.ok(bundle.includes('.mtx-graph[data-far] .mtx-card-sub{display:none'), 'and so is the subtitle, which is unreadable there');
+  assert.ok(bundle.includes('.mtx-graph[data-far] .mtx-card[data-current]{box-shadow:0 0 0 1px'),
+    'the "where am I" ring survives the overview: it is spread-only, so it costs nothing');
+  assert.ok(bundle.includes('.mtx-graph[data-far] .mtx-card[data-head]{box-shadow:0 0 0 2px'),
+    'and so does the head ring');
+  const apply = between('function applyView()', 'function promoteWorld()');
+  assert.match(apply, /const far = view\.scale < FAR_SCALE;/, 'the canvas decides it from the scale on screen');
+  assert.match(apply, /if \(far !== graph\.hasAttribute\('data-far'\)\) \{/,
+    'and writes it only when it changes — a write per pan frame would recalculate style for every card');
+});
+
+test('the canvas size is kept, not read, so the sticky clamp never forces layout', () => {
+  const clamp = between('function positionGroupNames()', 'function renderFrame()');
+  // The clamp runs on every pan frame. It reads the remembered size first; the
+  // direct read is only a fallback for a renderer whose observer never ran.
+  assert.match(clamp, /const height = graphSizeRef\.current\.h \|\| graphEl\.clientHeight \|\| 0;/,
+    'the sticky clamp prefers the remembered size and only falls back to reading');
+  assert.match(code, /const graphSizeRef = React\.useRef\(\{ w: 0, h: 0 \}\);/, 'the size lives in a ref');
+  assert.match(code, /new ResizeObserver\(remember\)/, 'a ResizeObserver keeps it up to date');
+  assert.match(code, /const w = size\.w \|\| el\.clientWidth \|\| 600;/, 'the fit prefers the remembered size too');
+});
