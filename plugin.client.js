@@ -2899,15 +2899,18 @@ return {
       // stylesheet. The conversation module's class prefix is read off our own
       // ancestor rather than hard-coded: the hashed scope changes between host
       // builds, and a rename should degrade to "the chrome stays", never to a
-      // broken panel. The host unmounts inactive views, so mount/unmount is
-      // exactly the right lifetime.
+      // broken panel. Two formats exist across host lines — 0.1.x namespaces its
+      // CSS modules as `_hash_name` (underscore-led) and 0.2.x as `hash_name` —
+      // so the scope is the leading run up to and including the trailing
+      // underscore, with the opening underscore optional. The host unmounts
+      // inactive views, so mount/unmount is exactly the right lifetime.
       React.useEffect(function () {
         const graphEl = graphRef.current;
         if (!graphEl) return undefined;
         let scope = null;
         for (let node = graphEl; node && node !== document.body; node = node.parentElement) {
           const cls = typeof node.className === 'string' ? node.className : '';
-          const match = /(?:^|\s)(_[A-Za-z0-9]+_)[A-Za-z]/.exec(cls);
+          const match = /(?:^|\s)(_?[A-Za-z0-9]+_)[A-Za-z]/.exec(cls);
           if (match) { scope = match[1]; break; }
         }
         if (scope === null) return undefined;
