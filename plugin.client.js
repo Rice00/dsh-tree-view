@@ -19,6 +19,86 @@ function realGlobal() {
   return null;
 }
 
+/* ------------------------------------------------------------ diagnostics -- */
+
+// Client diagnostics ride back to the host over the same route as every other
+// action, so a report never has to be transcribed from a DevTools console. The
+// renderer's console is not persisted anywhere the host can read, and most of
+// what matters for a "the tree did the wrong thing" report happens in the
+// renderer — including errors the app's own sidebar logs. Lines still reach the
+// local console too, for whoever has it open.
+//
+// The queue is deliberately lossy and fire-and-forget: a dropped line is fine, a
+// canvas that waits on a network round trip is not.
+const nativeLog = typeof console !== 'undefined' && console.log ? console.log.bind(console) : function () {};
+const nativeWarn = typeof console !== 'undefined' && console.warn ? console.warn.bind(console) : function () {};
+const nativeError = typeof console !== 'undefined' && console.error ? console.error.bind(console) : function () {};
+const logQueue = [];
+let logFlushTimer = 0;
+
+function remoteLog(level, message, meta) {
+  (level === 'error' ? nativeError : level === 'warn' ? nativeWarn : nativeLog)('[dsh-tree-view] ' + message, meta === undefined ? '' : meta);
+  const g = realGlobal();
+  if (!g || typeof g.fetch !== 'function') return;
+  logQueue.push({ level: level, message: message, meta: meta === undefined ? undefined : meta });
+  if (logQueue.length > 300) logQueue.shift();
+  if (logFlushTimer) return;
+  logFlushTimer = setTimeout(function () {
+    logFlushTimer = 0;
+    const batch = logQueue.splice(0, logQueue.length);
+    if (batch.length === 0) return;
+    const now = realGlobal();
+    if (!now || typeof now.fetch !== 'function') return;
+    now.fetch(ROUTE, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ action: 'log', entries: batch }),
+    }).catch(function () {});
+  }, 250);
+}
+
+// Forward renderer errors that are not ours — the app's own races included — so
+// the next "it jumps back" report carries the actual failure without a DevTools
+// paste. Uncaught errors and rejections go through the window handlers; the
+// console.error wrapper is what catches the app's "Sidebar Session opening
+// failed" style diagnostics, which are logged, not thrown.
+let errorForwardingInstalled = false;
+const ERROR_HOOK_MARK = '__dshTreeViewErrorHooked';
+function installErrorForwarding() {
+  if (errorForwardingInstalled) return;
+  errorForwardingInstalled = true;
+  const g = realGlobal();
+  if (!g) return;
+  try {
+    // Marked on the shared console object so a re-mounted bundle never stacks a
+    // second wrapper on top of the first (the tests remount the client per case).
+    if (typeof console !== 'undefined' && typeof console.error === 'function' && !console[ERROR_HOOK_MARK]) {
+      console[ERROR_HOOK_MARK] = true;
+      const original = console.error;
+      console.error = function () {
+        try { original.apply(console, arguments); } catch (e) {}
+        const text = Array.prototype.map.call(arguments, function (a) {
+          return a && a.stack ? String(a.stack) : typeof a === 'string' ? a : (function () { try { return JSON.stringify(a); } catch (e) { return String(a); } })();
+        }).join(' ').slice(0, 2000);
+        if (text) remoteLog('error', 'console.error: ' + text);
+      };
+    }
+  } catch (e) {}
+  try {
+    if (g.addEventListener) {
+      g.addEventListener('error', function (event) {
+        const message = event && (event.message || (event.error && event.error.message));
+        if (message) remoteLog('error', 'uncaught: ' + message);
+      });
+      g.addEventListener('unhandledrejection', function (event) {
+        const reason = event && event.reason;
+        const message = reason && (reason.message || String(reason));
+        if (message) remoteLog('error', 'unhandledrejection: ' + message);
+      });
+    }
+  } catch (e) {}
+}
+
 /* ------------------------------------------------------------- edit style -- */
 
 // Which provider's message-edit LAYOUT to follow. All three put the controls
@@ -482,7 +562,7 @@ function ringFor(versions, sessionId, turn) {
  */
 async function openVersionTarget(sessions, v) {
   if (!v || v.deleted || !sessions) return;
-  console.log('[dsh-tree-view] open: ' + v.sessionId + ' archived=' + v.archived + (sessions.unarchive ? ' (workspace unarchive available)' : ''));
+  remoteLog('info', 'open: ' + v.sessionId + ' archived=' + v.archived + (sessions.unarchive ? ' (workspace unarchive available)' : ''));
   if (v.archived) {
     // Bringing a collected version back out is a *client* operation on 0.1.7
     // (`uiWorkspace.unarchiveSession`), and that is the whole difference: our own
@@ -496,7 +576,7 @@ async function openVersionTarget(sessions, v) {
       try {
         unarchived = await sessions.unarchive(v.sessionId);
       } catch (e) {
-        console.warn('[dsh-tree-view] could not bring the version back out:', e && e.message ? e.message : e);
+        remoteLog('warn', 'could not bring the version back out:', e && e.message ? e.message : e);
       }
     }
     if (!unarchived) {
@@ -504,7 +584,7 @@ async function openVersionTarget(sessions, v) {
         await mutate({ action: 'activate', sessionId: v.sessionId });
       } catch (e) {
         // Swallowing this used to hide a click that could never work.
-        console.warn('[dsh-tree-view] could not unarchive the version through the host either:', e && e.message ? e.message : e);
+        remoteLog('warn', 'could not unarchive the version through the host either:', e && e.message ? e.message : e);
       }
     }
     treeStore.invalidate();
@@ -527,7 +607,7 @@ function collectLeftVersion(sessions, left, target, versions) {
     .then(function () { treeStore.load(target); })
     .catch(function (error) {
       // Nothing to recover from: the version simply stays where it is.
-      console.warn('[dsh-tree-view] could not collect the version you left:', error && error.message);
+      remoteLog('warn', 'could not collect the version you left:', error && error.message);
     });
 }
 
@@ -690,7 +770,7 @@ function sessionNavigator(ctx) {
         const workspace = service('uiWorkspace');
         if (workspace && typeof workspace.openSession === 'function') {
           try { workspace.openSession(sessionId); }
-          catch (e) { console.warn('[dsh-tree-view] reinforce failed for ' + sessionId + ': ' + (e && e.message ? e.message : e)); }
+          catch (e) { remoteLog('warn', 'reinforce failed for ' + sessionId + ': ' + (e && e.message ? e.message : e)); }
         }
       };
       const attempt = function (left) {
@@ -704,7 +784,7 @@ function sessionNavigator(ctx) {
             return true;
           } catch (e) {
             if (left > 0) { setTimeout(function () { attempt(left - 1); }, 150); return false; }
-            console.warn('[dsh-tree-view] could not open ' + sessionId + ': ' + (e && e.message ? e.message : e));
+            remoteLog('warn', 'could not open ' + sessionId + ': ' + (e && e.message ? e.message : e));
             return false;
           }
         }
@@ -716,11 +796,11 @@ function sessionNavigator(ctx) {
             return true;
           } catch (e) {
             if (left > 0) { setTimeout(function () { attempt(left - 1); }, 150); return false; }
-            console.warn('[dsh-tree-view] could not open ' + sessionId + ': ' + (e && e.message ? e.message : e));
+            remoteLog('warn', 'could not open ' + sessionId + ': ' + (e && e.message ? e.message : e));
             return false;
           }
         }
-        console.warn('[dsh-tree-view] This DSH build exposes no session navigation service; the tree stays readable, switching versions does not.');
+        remoteLog('warn', 'This DSH build exposes no session navigation service; the tree stays readable, switching versions does not.');
         return false;
       };
       // 20 tries over three seconds: long enough for an unarchive to reach the
@@ -1469,6 +1549,9 @@ return {
     if (slots === undefined) {
       throw new Error('[dsh-tree-view] Missing DSH slots service. Check dsh.client.inject and restart DSH.');
     }
+    // Surface renderer errors — ours and the app's — on the host, before any
+    // user-visible work runs. Idempotent: the first apply wins.
+    installErrorForwarding();
     ctx.effect(function () { return styles.insert(CSS); });
     // Reflect the chosen edit style onto <html> now and on every change.
     ctx.effect(function () { syncStyleAttribute(); return styleStore.subscribe(syncStyleAttribute); });
@@ -1696,7 +1779,7 @@ return {
         scope.effect(function () { return locale.register(I18N_NS, I18N); });
         t = locale.bind(I18N_NS);
       } catch (e) {
-        console.warn('[dsh-tree-view] Failed to register translations; using English.', e);
+        remoteLog('warn', 'Failed to register translations; using English.', e);
       }
     });
 
@@ -2463,14 +2546,14 @@ return {
       function openVersion(id) {
         const lay = layoutRef.current;
         const node = lay && lay.byId.get(id);
-        if (!node || node.deleted) { console.log('[dsh-tree-view] click: no live node for ' + id); return; }
+        if (!node || node.deleted) { remoteLog('info', 'click: no live node for ' + id); return; }
         // The fold node is not a session; it is the shared history in one card,
         // and clicking it is how you read that history again.
         if (node.fold) { setFoldExpanded(true); return; }
-        if (!sessions) { console.log('[dsh-tree-view] click: no navigator'); return; }
+        if (!sessions) { remoteLog('info', 'click: no navigator'); return; }
         const v = versions.find(function (item) { return item.sessionId === node.sessionId; });
-        if (!v) { console.log('[dsh-tree-view] click: ' + node.sessionId + ' is not in the payload'); return; }
-        console.log('[dsh-tree-view] click: ' + node.sessionId + ' | prop-session=' + sessionId + ' | archived=' + v.archived);
+        if (!v) { remoteLog('info', 'click: ' + node.sessionId + ' is not in the payload'); return; }
+        remoteLog('info', 'click: ' + node.sessionId + ' | prop-session=' + sessionId + ' | archived=' + v.archived);
         // "Is this the version already on screen" decides whether a click is just
         // "take me back to the Chat tab", and the slot's own sessionId is not
         // trustworthy enough for it: the view can keep the id it mounted with after
@@ -2480,7 +2563,7 @@ return {
         const onScreen = sessions.mainSession ? sessions.mainSession() : null;
         const alreadyOnScreen = onScreen !== null ? v.sessionId === onScreen : v.sessionId === sessionId;
         if (alreadyOnScreen) {
-          console.log('[dsh-tree-view] click: already on screen (' + (onScreen !== null ? 'app says ' + onScreen : 'prop') + ') — no switch');
+          remoteLog('info', 'click: already on screen (' + (onScreen !== null ? 'app says ' + onScreen : 'prop') + ') — no switch');
           showChat();
           if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
           return;
@@ -2574,7 +2657,7 @@ return {
           .catch(function (error) {
             const message = error && error.message ? error.message : String(error);
             setRenameError(t('moveFailed', { message: message }));
-            console.warn('[dsh-tree-view] ' + action + ' failed', error);
+            remoteLog('warn', '' + action + ' failed', error);
           });
       }
 
@@ -2592,7 +2675,7 @@ return {
           .catch(function (error) {
             const message = error && error.message ? error.message : String(error);
             setRenameError(t('renameFailed', { message: message }));
-            console.warn('[dsh-tree-view] branch rename failed', error);
+            remoteLog('warn', 'branch rename failed', error);
           });
       }
 
@@ -3085,7 +3168,7 @@ return {
           UserMessageView
         );
       } catch (e) {
-        console.warn('[dsh-tree-view] Failed to register the user-message view; editing is unavailable.', e);
+        remoteLog('warn', 'Failed to register the user-message view; editing is unavailable.', e);
         return function () {};
       }
     });

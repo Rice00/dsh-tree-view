@@ -838,3 +838,15 @@ test('the Chat tab opens only once the app is on the version you clicked', async
   }
   assert.ok(view.tabClicks.length >= 1, 'the Chat tab opens once the target is on screen');
 });
+
+test('a click is logged to the host through the log action', async (t) => {
+  const posts = [];
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, recording(posts, VERSIONS), 'session-root');
+  await view.clickCard('session-fork#t16');
+  // The log queue flushes on a timer, so wait for it.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const logPosts = posts.filter((p) => p.action === 'log');
+  assert.ok(logPosts.length >= 1, 'a log post reaches the host: ' + JSON.stringify(posts.map((p) => p.action)));
+  const messages = logPosts.flatMap((p) => p.entries.map((e) => e.message)).join(' ');
+  assert.ok(/click/.test(messages), 'the click decision is logged: ' + messages);
+});

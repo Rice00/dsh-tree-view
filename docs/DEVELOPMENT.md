@@ -135,6 +135,23 @@ on an OS-selected port, runs the verifier, restarts the host, and repeats.
 The restart pass explicitly resumes and retries an already seeded branch.
 CI runs this on Linux and Windows in addition to the regression suite.
 
+### Diagnostics log
+
+The client posts its decision lines back over `/tree-view` (`action: "log"`),
+and the host appends them to a day-scoped file under the harness's storages
+root:
+
+    ~/.dsh/storages/tree-view/logs/tree-view-YYYY-MM-DD.log
+
+This is where a "clicking back landed on the wrong session" report should be
+read first: it carries each click decision, every navigation attempt and its
+retries, and — through the renderer's error handlers — errors the app itself
+logs (the right-sidebar race that surfaced as `Sidebar Session opening failed`
+is one such). The queue is lossy and fire-and-forget by design: a dropped line
+is fine, a canvas that waits on a network round trip is not. The host half must
+be restarted once for the `log` action to exist before the client can post to
+it.
+
 ---
 
 ## 4. Release & Compatibility Policy
