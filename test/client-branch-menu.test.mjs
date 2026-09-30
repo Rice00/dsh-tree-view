@@ -17,7 +17,7 @@ const VERSIONS = [
 // The regression this exists for: the card/menu state used to come from a
 // layout memo that did not depend on the archive flag, so right-clicking right
 // after a move still offered the move that had just happened.
-async function mountView(t) {
+async function mountView(t, hooks = {}) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
     url: 'https://tree-view.test/',
     // The graph animates node positions, so the sandbox needs frame callbacks.
@@ -29,7 +29,11 @@ async function mountView(t) {
   // the move itself instead of waiting for a refetch to tell it.
   dom.window.fetch = async (url, options) => {
     if (options && options.method === 'POST') {
-      posts.push(JSON.parse(options.body));
+      const body = JSON.parse(options.body);
+      posts.push(body);
+      // A test can hold the answer open (`hooks.label`) to see what the view shows
+      // while the host is still working, or answer with its own normalization.
+      if (hooks.label && body.action === 'label') return hooks.label(body);
       return { ok: true, json: async () => ({ ok: true }) };
     }
     return { ok: true, json: async () => ({ versions: VERSIONS }) };
@@ -118,6 +122,22 @@ async function mountView(t) {
       await act(async () => { await Promise.resolve(); });
     },
     groupNames: () => [...dom.window.document.querySelectorAll('.mtx-group-name')].map((el) => el.textContent),
+    panelErrors: () => [...dom.window.document.querySelectorAll('.mtx-error')].map((el) => el.textContent),
+    renameTo: async (text) => {
+      const input = dom.window.document.querySelector('.mtx-rename-input');
+      assert.ok(input, 'the rename editor is open');
+      await act(async () => {
+        // React tracks the previous value, so the native setter is what makes a
+        // programmatic edit look like typing.
+        const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set;
+        setter.call(input, text);
+        input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+      });
+      await act(async () => {
+        input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      await act(async () => { await Promise.resolve(); });
+    },
   };
 }
 
@@ -158,4 +178,61 @@ test('a named branch is drawn as a group whose name is the version name', async 
   });
   await act(async () => { await Promise.resolve(); });
   assert.deepEqual(view.posts, [{ action: 'label', sessionId: 'session-branch', label: '方案 B' }]);
+});
+
+test('a rename is on screen before the host has answered', async (t) => {
+  // The regression: a rename ended with a full payload reload, and on a large
+  // family the host takes seconds to rebuild it — so the name you typed appeared
+  // only after everything else had been re-fetched. Here the host never answers at
+  // all, which is the strongest form of "the reader should not be waiting on it".
+  let answer = null;
+  const view = await mountView(t, {
+    label: () => new Promise((resolve) => { answer = resolve; }),
+  });
+
+  await view.openMenuOnBranch();
+  await view.clickMenuItem('Rename branch');
+  await view.renameTo('方案 B');
+
+  assert.deepEqual(view.posts, [{ action: 'label', sessionId: 'session-branch', label: '方案 B' }],
+    'the rename reached the host route');
+  assert.deepEqual(view.groupNames(), ['方案 B'],
+    'and the name is drawn while the host is still working');
+
+  // When the host finally answers with the label it stored, that is what stays.
+  await act(async () => {
+    answer({ ok: true, json: async () => ({ ok: true, sessionId: 'session-branch', label: '方案 B' }) });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  assert.deepEqual(view.groupNames(), ['方案 B'], 'and the answer does not change it');
+});
+
+test('the label the host stored wins over what was typed', async (t) => {
+  const view = await mountView(t, {
+    // The host normalizes what it stores (trims, collapses whitespace), so its own
+    // answer is the truth rather than the optimistic guess.
+    label: async () => ({ ok: true, json: async () => ({ ok: true, sessionId: 'session-branch', label: '方案 B（已规范化）' }) }),
+  });
+
+  await view.openMenuOnBranch();
+  await view.clickMenuItem('Rename branch');
+  await view.renameTo('方案 B');
+
+  assert.deepEqual(view.groupNames(), ['方案 B（已规范化）'],
+    'the host\'s normalization replaces the optimistic text');
+});
+
+test('a refused rename takes the optimistic name back and says why', async (t) => {
+  const view = await mountView(t, {
+    label: async () => ({ ok: false, json: async () => ({ error: '名字太长' }) }),
+  });
+
+  await view.openMenuOnBranch();
+  await view.clickMenuItem('Rename branch');
+  await view.renameTo('方案 B');
+
+  assert.deepEqual(view.groupNames(), [], 'the optimistic name is withdrawn');
+  assert.ok(view.panelErrors().some((text) => text.includes('名字太长')),
+    'and the refusal is reported in the panel: ' + JSON.stringify(view.panelErrors()));
 });

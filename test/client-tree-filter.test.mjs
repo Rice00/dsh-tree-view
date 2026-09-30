@@ -21,7 +21,7 @@ const VERSIONS = [
   { sessionId: 'session-fork', parentSessionId: 'session-root', createdAt: 3, forkTurn: 15, turns: FORK_TURNS },
 ];
 
-async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId = 'session-root', catalogue = {}, host = 'legacy', seed = null) {
+async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId = 'session-root', catalogue = {}, host = 'legacy', seed = null, options = {}) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
     url: 'https://tree-view.test/',
     pretendToBeVisual: true,
@@ -37,6 +37,17 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   // tree payload a previous visit would have left behind.
   if (seed) for (const [key, value] of Object.entries(seed)) dom.window.localStorage.setItem(key, value);
   dom.window.fetch = fetchImpl ?? (async () => ({ ok: true, json: async () => ({ versions }) }));
+  // jsdom has no ResizeObserver. A test can ask for a double so that code which listens
+  // for a change in size — the reading marker follows the card it points at — can be
+  // driven from the test instead of hoped for.
+  const resizeObservers = [];
+  if (options.resizeObserver) {
+    dom.window.ResizeObserver = class {
+      constructor(callback) { this.callback = callback; this.target = null; resizeObservers.push(this); }
+      observe(target) { this.target = target; }
+      disconnect() { this.target = null; }
+    };
+  }
   const previous = new Map();
   const browserErrors = [];
   dom.window.addEventListener('error', (event) => browserErrors.push(event.error || event.message));
@@ -226,7 +237,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   return {
     dom, cardIds, offsets, titles, links, tools, clickTool, clickCard, foldCard,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
-    worldTransform, dragFromCard, retain, unarchived,
+    worldTransform, dragFromCard, retain, unarchived, resizeObservers,
     opened, workspaceOpened, tabClicks,
   };
 }
@@ -882,4 +893,372 @@ test('a cold open paints the last tree at once, then the host answer replaces it
   }
   assert.ok(view.cardIds().length > atOnce,
     'the host answer replaces what was remembered: ' + atOnce + ' -> ' + view.cardIds().length);
+});
+
+test('a branch name follows the view sideways, not only downwards', async (t) => {
+  // Reported: the name followed vertically but not horizontally. The clamp kept it
+  // inside the visible band on the Y axis only, so panning along a branch (or
+  // zooming in) left the name behind at the group's own left edge.
+  const labeled = VERSIONS.map((v) => (v.sessionId === 'session-root' ? Object.assign({}, v, { label: '主线' }) : v));
+  const view = await mountView(t, { dropEmptyForks: false }, labeled);
+  const doc = view.dom.window.document;
+  const graph = doc.querySelector('.mtx-graph');
+  // jsdom lays nothing out, so the canvas is given the size a real one has: without
+  // it the clamp has no viewport to clamp into and correctly does nothing.
+  Object.defineProperty(graph, 'clientWidth', { value: 900, configurable: true });
+  Object.defineProperty(graph, 'clientHeight', { value: 700, configurable: true });
+
+  const group = doc.querySelector('.mtx-group');
+  const name = doc.querySelector('.mtx-group-name');
+  assert.ok(group && name, 'the named branch is drawn as a group');
+  const nums = (value) => (String(value || '').match(/-?[\d.]+/g) || []).map(Number);
+  const groupWidth = parseFloat(group.style.width);
+  assert.ok(groupWidth > 260, 'this branch is wider than a single card, so its own left edge can leave the view: ' + groupWidth);
+
+  // Pan just far enough that the group's left edge is 60 world units left of the
+  // view's left edge — the group still covers the view, which is the case the clamp
+  // exists for. (Panning further would take the whole branch off screen, and there
+  // the name must stay with its branch instead.)
+  const world0 = nums(doc.querySelector('.mtx-world').style.transform);
+  const box0 = nums(group.style.transform);
+  const scale = world0[2];
+  const targetVisibleLeft = box0[0] + 60;
+  const dx = -targetVisibleLeft * scale - world0[0];
+  await view.dragFromCard('session-root#root', dx, 0);
+
+  const world = nums(doc.querySelector('.mtx-world').style.transform);
+  const box = nums(group.style.transform);
+  const label = nums(name.style.transform);
+  assert.ok(label.length === 3, 'the name is positioned and counter-scaled by the clamp: ' + JSON.stringify(label));
+  assert.ok(Math.abs(label[2] * world[2] - 1) < 1e-6,
+    'the counter-scale cancels the world zoom, so the name keeps its size on screen: ' + label[2] + ' * ' + world[2]);
+
+  const visibleLeft = -world[0] / world[2];
+  assert.ok(Math.abs(visibleLeft - targetVisibleLeft) < 2, 'the pan landed where it was aimed: ' + visibleLeft);
+  assert.ok(box[0] < visibleLeft, 'the group starts left of the view after the pan: ' + box[0] + ' vs ' + visibleLeft);
+  assert.ok(label[0] > box[0],
+    'so the name moved sideways with the view instead of staying at the frame edge: ' + label[0] + ' vs ' + box[0]);
+  assert.ok(label[0] >= visibleLeft - 1,
+    'and it is still inside the view: ' + label[0] + ' vs ' + visibleLeft);
+  assert.ok(label[0] + 48 / world[2] <= box[0] + groupWidth + 1,
+    'without leaving its own frame: ' + (label[0] + 48 / world[2]) + ' vs ' + (box[0] + groupWidth));
+});
+
+test('a branch name lines up with its own frame when the whole frame is in view', async (t) => {
+  // Reported: the name sat a little inside the frame it names. It now rests on the frame's
+  // own left edge and only leaves it when that edge scrolls out of view.
+  const labeled = VERSIONS.map((v) => (v.sessionId === 'session-root' ? Object.assign({}, v, { label: '主线' }) : v));
+  const view = await mountView(t, { dropEmptyForks: false }, labeled);
+  const doc = view.dom.window.document;
+  const graph = doc.querySelector('.mtx-graph');
+  Object.defineProperty(graph, 'clientWidth', { value: 900, configurable: true });
+  Object.defineProperty(graph, 'clientHeight', { value: 700, configurable: true });
+
+  const nums = (value) => (String(value || '').match(/-?[\d.]+/g) || []).map(Number);
+  const box = nums(doc.querySelector('.mtx-group').style.transform);
+  const label = nums(doc.querySelector('.mtx-group-name').style.transform);
+  assert.ok(Math.abs(label[0] - box[0]) < 0.01,
+    'the name left edge is the frame left edge: ' + label[0] + ' vs ' + box[0]);
+  assert.ok(label[1] >= box[1], 'and it starts at or below the frame top: ' + label[1] + ' vs ' + box[1]);
+});
+
+test('a branch name follows the view down a tall branch', async (t) => {
+  // The sticky follower is a feature, not an accident: a branch is thousands of world
+  // units tall, and a name pinned to the frame's top edge scrolls away exactly when the
+  // reader is looking at the middle of the branch.
+  const labeled = VERSIONS.map((v) => (v.sessionId === 'session-root' ? Object.assign({}, v, { label: '主线' }) : v));
+  const view = await mountView(t, { dropEmptyForks: false }, labeled);
+  const doc = view.dom.window.document;
+  const graph = doc.querySelector('.mtx-graph');
+  Object.defineProperty(graph, 'clientWidth', { value: 900, configurable: true });
+  Object.defineProperty(graph, 'clientHeight', { value: 700, configurable: true });
+
+  const nums = (value) => (String(value || '').match(/-?[\d.]+/g) || []).map(Number);
+  const frame = doc.querySelector('.mtx-group');
+  const name = doc.querySelector('.mtx-group-name');
+  const frameHeight = parseFloat(frame.style.height);
+  assert.ok(frameHeight > 700, 'this branch is taller than the view: ' + frameHeight);
+
+  // Pan up until the frame's top edge is a thousand world units above the view.
+  const world0 = nums(doc.querySelector('.mtx-world').style.transform);
+  const box0 = nums(frame.style.transform);
+  const scale = world0[2];
+  const visibleTop0 = -world0[1] / scale;
+  const dy = (box0[1] - 1000 - visibleTop0) * scale;
+  await view.dragFromCard('session-root#root', 0, dy);
+
+  const world = nums(doc.querySelector('.mtx-world').style.transform);
+  const label = nums(name.style.transform);
+  const visibleTop = -world[1] / world[2];
+  const visibleBottom = visibleTop + 700 / world[2];
+  assert.ok(box0[1] < visibleTop, 'the frame top is above the view now: ' + box0[1] + ' vs ' + visibleTop);
+  assert.ok(label[1] >= visibleTop, 'but the name is still inside the view: ' + label[1] + ' vs ' + visibleTop);
+  assert.ok(label[1] <= visibleBottom, 'and above its bottom edge: ' + label[1] + ' vs ' + visibleBottom);
+});
+
+// The conversation is virtualised — three rows of a seventy-turn session were the
+// whole DOM when this was written — so a turn far from the reader is not there to
+// scroll to. The host's own turn rail is what loads it, and clicking its mark is
+// also exactly what the reader does by hand.
+function fakeRail(doc, turns, activeTurn) {
+  const rail = doc.createElement('div');
+  const scroller = doc.createElement('div');
+  const list = doc.createElement('div');
+  Object.defineProperty(scroller, 'scrollHeight', { value: 700, configurable: true });
+  Object.defineProperty(scroller, 'clientHeight', { value: 300, configurable: true });
+  scroller.appendChild(list);
+  rail.appendChild(scroller);
+  doc.body.appendChild(rail);
+  const clicked = [];
+  for (const turn of turns) {
+    const mark = doc.createElement('button');
+    mark.setAttribute('data-index', String(turn - 1));
+    mark.setAttribute('aria-label', '跳转到第 ' + turn + ' 轮');
+    if (turn === activeTurn) mark.setAttribute('aria-current', 'true');
+    mark.addEventListener('click', () => clicked.push(turn));
+    list.appendChild(mark);
+  }
+  return { click: clicked, scroller, list };
+}
+
+test('a node click jumps through the host own turn rail', async (t) => {
+  const posts = [];
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, recording(posts, VERSIONS), 'session-root');
+  const doc = view.dom.window.document;
+
+  // The row the landing is watched for, standing in for the one the host mounts —
+  // and mounted only *after* the mark is clicked, which is the order the real host
+  // works in: the row for a turn that was never loaded does not exist until the rail
+  // asks for it.
+  const row = doc.createElement('div');
+  row.className = 'mtx-row';
+  row.setAttribute('data-session', 'session-fork');
+  row.setAttribute('data-turn', '16');
+  row.scrollIntoView = () => {};
+  const bubble = doc.createElement('div');
+  bubble.className = 'mtx-bubble';
+  row.appendChild(bubble);
+
+  const rail = fakeRail(doc, [14, 15, 16, 17], null);
+  const mark = [...rail.list.querySelectorAll('button[data-index]')].find((el) => el.getAttribute('aria-label') === '跳转到第 16 轮');
+  mark.addEventListener('click', () => doc.body.appendChild(row));
+
+  await view.clickCard('session-fork#t16');
+  for (let i = 0; i < 40 && !row.classList.contains('mtx-flash'); i++) await new Promise((r) => setTimeout(r, 20));
+
+  assert.deepEqual(rail.click, [16], 'the rail mark for that turn is what gets clicked');
+  assert.ok(row.classList.contains('mtx-flash'), 'and the row that landed flashes');
+
+  await new Promise((r) => setTimeout(r, 400));
+  const logged = posts.filter((p) => p.action === 'log').flatMap((p) => p.entries.map((e) => e.message)).join(' ');
+  assert.match(logged, /jump: session-fork turn 16 via rail/, 'the route taken is logged: ' + logged);
+});
+
+test('a turn outside the rail window scrolls the rail instead of giving up silently', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  const rail = fakeRail(doc, [1, 2, 3, 4, 5], null);
+
+  await view.clickCard('session-fork#t16');
+  await new Promise((r) => setTimeout(r, 200));
+
+  assert.deepEqual(rail.click, [], 'no mark was clicked — the rail is showing another window');
+  assert.ok(rail.scroller.scrollTop > 0, 'the rail was scrolled toward that turn: ' + rail.scroller.scrollTop);
+});
+
+test('the tree points at the turn the conversation is sitting on', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  // jsdom lays nothing out: the clamp and the marker both need a canvas size, and
+  // without one they (correctly) do nothing at all.
+  const graphEl = doc.querySelector('.mtx-graph');
+  Object.defineProperty(graphEl, 'clientWidth', { value: 900, configurable: true });
+  Object.defineProperty(graphEl, 'clientHeight', { value: 700, configurable: true });
+
+  assert.equal(doc.querySelector('.mtx-here'), null, 'nothing is marked until the host says where the reader is');
+
+  fakeRail(doc, [4, 5, 6], null);
+  const mark = [...doc.querySelectorAll('button[data-label], button[data-index]')].find((el) => el.getAttribute('aria-label') === '跳转到第 5 轮');
+  await act(async () => {
+    mark.setAttribute('aria-current', 'true');
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  const marker = doc.querySelector('.mtx-here');
+  assert.ok(marker, 'the marker is drawn');
+  assert.equal(marker.getAttribute('data-node'), 'session-root#t5', 'pointing at the node for the turn the host reports');
+  assert.equal(marker.getAttribute('title'), 'You are reading this turn', 'and says what it is');
+
+  // The anchor is the card's right edge at its vertical middle — the tip of the
+  // triangle, which is what points at the node. Nothing is drawn on the card itself:
+  // `contain: paint` would clip anything outside its box.
+  const card = doc.querySelector('.mtx-card[data-id="session-root#t5"]');
+  const nums = (value) => (String(value || '').match(/-?[\d.]+/g) || []).map(Number);
+  const cardBox = nums(card.style.transform);
+  const markerPos = nums(marker.style.transform);
+  const world = nums(doc.querySelector('.mtx-world').style.transform);
+  assert.ok(Math.abs(markerPos[0] - (cardBox[0] + 176)) < 0.01,
+    'the anchor sits on the card right edge: ' + markerPos[0] + ' vs ' + (cardBox[0] + 176));
+  assert.ok(Math.abs(markerPos[1] - (cardBox[1] + 58 / 2)) < 0.01,
+    'and on its vertical middle: ' + markerPos[1] + ' vs ' + (cardBox[1] + 29));
+  assert.ok(Math.abs(markerPos[2] * world[2] - 1) < 1e-6,
+    'the marker counter-scales, so the triangle keeps its size at any zoom: ' + markerPos[2] + ' * ' + world[2]);
+  assert.ok(doc.querySelector('.mtx-here-tip'), 'and the triangle is a counter-scaled child');
+  assert.equal(doc.querySelector('.mtx-card[data-here]'), null, 'and nothing is drawn on the card itself');
+
+  // A zoom is not a spring frame: the counter-scale has to be refreshed by the frame
+  // that positions the names, or the triangle grows with the zoom. Measured live: the
+  // world at 0.59 while the marker still carried the counter-scale for 0.3.
+  const beforeScale = nums(doc.querySelector('.mtx-world').style.transform)[2];
+  await act(async () => {
+    doc.querySelector('.mtx-graph').dispatchEvent(new doc.defaultView.WheelEvent('wheel', { deltaY: -260, cancelable: true, bubbles: true }));
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  const afterScale = nums(doc.querySelector('.mtx-world').style.transform)[2];
+  assert.ok(afterScale > beforeScale, 'the wheel zoomed in: ' + beforeScale + ' -> ' + afterScale);
+  const afterMarker = nums(doc.querySelector('.mtx-here').style.transform);
+  assert.ok(Math.abs(afterMarker[2] * afterScale - 1) < 1e-6,
+    'and the marker counter-scaled with it, so the triangle keeps its size: ' + afterMarker[2] + ' * ' + afterScale);
+});
+
+test('a jump marks the turn that was asked for, not the one the rail lags to', async (t) => {
+  // The host's rail reports the turn at its reading line, and a landing leaves the
+  // target just below that line — so after a jump its report is one turn short. The
+  // marker follows the request until the reader scrolls themselves.
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  const rail = fakeRail(doc, [9, 10, 11], null);
+
+  // The turn wants to be clickable: turn 11 of the root version.
+  const card = doc.querySelector('.mtx-card[data-id="session-root#t11"]');
+  assert.ok(card, 'the target node is drawn');
+  const r = card.getBoundingClientRect();
+  const at = (x, y) => ({ bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+  await act(async () => {
+    card.dispatchEvent(new doc.defaultView.MouseEvent('pointerdown', at(r.left + 20, r.top + 12)));
+    card.dispatchEvent(new doc.defaultView.MouseEvent('pointerup', at(r.left + 20, r.top + 12)));
+  });
+
+  assert.equal(doc.querySelector('.mtx-here').getAttribute('data-node'), 'session-root#t11',
+    'the marker is on the turn that was clicked');
+
+  // The rail answers with the previous turn, as the real host does mid-landing.
+  const lagging = [...rail.list.querySelectorAll('button[data-index]')].find((el) => el.getAttribute('aria-label') === '跳转到第 10 轮');
+  await act(async () => {
+    lagging.setAttribute('aria-current', 'true');
+    await new Promise((r2) => setTimeout(r2, 0));
+  });
+  assert.equal(doc.querySelector('.mtx-here').getAttribute('data-node'), 'session-root#t11',
+    'and the lagging rail report does not move it');
+
+  // A real gesture hands the position back to the host.
+  await act(async () => {
+    doc.dispatchEvent(new doc.defaultView.Event('wheel', { bubbles: true }));
+    await new Promise((r2) => setTimeout(r2, 0));
+  });
+  assert.equal(doc.querySelector('.mtx-here').getAttribute('data-node'), 'session-root#t10',
+    'and scrolling hands it back to the rail');
+});
+
+test('a name that is following the view keeps a screen inset, at any zoom', async (t) => {
+  // The jitter report: the name followed the view, but its insets were world units, so
+  // the distance it kept from the view's edge grew and shrank as the reader zoomed. Every
+  // distance in the clamp is a screen distance now, so the inset is the same at any zoom —
+  // and the counter-scale keeps the name itself the same size.
+  const labeled = VERSIONS.map((v) => (v.sessionId === 'session-root' ? Object.assign({}, v, { label: '主线' }) : v));
+  const view = await mountView(t, { dropEmptyForks: false }, labeled);
+  const doc = view.dom.window.document;
+  const graph = doc.querySelector('.mtx-graph');
+  Object.defineProperty(graph, 'clientWidth', { value: 900, configurable: true });
+  Object.defineProperty(graph, 'clientHeight', { value: 700, configurable: true });
+  const nums = (value) => (String(value || '').match(/-?[\d.]+/g) || []).map(Number);
+
+  // Pan up so the frame's top edge is well above the view: the name is following the view
+  // there, which is the case the insets belong to.
+  const frame = doc.querySelector('.mtx-group');
+  const box0 = nums(frame.style.transform);
+  const world0 = nums(doc.querySelector('.mtx-world').style.transform);
+  const visibleTop0 = -world0[1] / world0[2];
+  const dy = (visibleTop0 - (box0[1] + 400)) * world0[2];
+  await view.dragFromCard('session-root#root', 0, dy);
+
+  const insetOnScreen = () => {
+    const world = nums(doc.querySelector('.mtx-world').style.transform);
+    const name = nums(doc.querySelector('.mtx-group-name').style.transform);
+    const visibleTop = -world[1] / world[2];
+    return { inset: (name[1] - visibleTop) * world[2], counter: name[2], scale: world[2] };
+  };
+
+  const before = insetOnScreen();
+  await act(async () => {
+    graph.dispatchEvent(new doc.defaultView.WheelEvent('wheel', { deltaY: -300, cancelable: true, bubbles: true }));
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  const after = insetOnScreen();
+
+  assert.notEqual(before.scale, after.scale, 'the wheel zoomed: ' + before.scale + ' -> ' + after.scale);
+  assert.ok(Math.abs(before.inset - 8) < 1.5, 'the name keeps an 8px inset from the view edge: ' + before.inset);
+  assert.ok(Math.abs(after.inset - 8) < 1.5, 'and the same one after zooming: ' + after.inset);
+  assert.ok(Math.abs(after.counter * after.scale - 1) < 1e-6, 'with the counter-scale cancelling the zoom');
+});
+
+test('the reading marker is there on the first open after a refresh', async (t) => {
+  // Reported: after refreshing the page the marker was missing until the reader had
+  // visited the Chat once — the rail only exists there, and the position lived only in
+  // memory. The last position is kept in storage now.
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root', {}, 'legacy', {
+    'dsh-tree-view:reading': JSON.stringify({ sessionId: 'session-root', turn: 5 }),
+  });
+  const doc = view.dom.window.document;
+  const marker = doc.querySelector('.mtx-here');
+  assert.ok(marker, 'the marker is drawn before any rail has been seen');
+  assert.equal(marker.getAttribute('data-node'), 'session-root#t5',
+    'pointing at the turn the last visit was reading');
+});
+
+test('the position the rail reports is remembered for the next visit', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  fakeRail(doc, [4, 5, 6], null);
+  const mark = [...doc.querySelectorAll('button[data-index]')].find((el) => el.getAttribute('aria-label') === '跳转到第 5 轮');
+  await act(async () => {
+    mark.setAttribute('aria-current', 'true');
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  const stored = JSON.parse(doc.defaultView.localStorage.getItem('dsh-tree-view:reading') || 'null');
+  assert.ok(stored && stored.turn === 5, 'the turn is written down for the next load: ' + JSON.stringify(stored));
+});
+
+test('the marker re-centres when its card changes height', async (t) => {
+  // Reported: centred on a folded node, off-centre on an expanded one. Measured card
+  // heights arrive once per layout, so a card that grew left the marker on the old centre;
+  // it now listens to the card it points at.
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root', {}, 'legacy', null, { resizeObserver: true });
+  const doc = view.dom.window.document;
+  fakeRail(doc, [4, 5, 6], null);
+  const mark = [...doc.querySelectorAll('button[data-index]')].find((el) => el.getAttribute('aria-label') === '跳转到第 5 轮');
+  await act(async () => {
+    mark.setAttribute('aria-current', 'true');
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  const card = doc.querySelector('.mtx-card[data-id="session-root#t5"]');
+  const watcher = view.resizeObservers.find((observer) => observer.target === card);
+  assert.ok(watcher, 'the marker listens to the card it points at');
+
+  const nums = (value) => (String(value || '').match(/-?[\d.]+/g) || []).map(Number);
+  const markerBefore = nums(doc.querySelector('.mtx-here').style.transform);
+  const cardY = nums(card.style.transform)[1];
+
+  // The card grows: 58px is the nominal height it was centred for.
+  Object.defineProperty(card, 'offsetHeight', { value: 104, configurable: true });
+  await act(async () => {
+    watcher.callback();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  const markerAfter = nums(doc.querySelector('.mtx-here').style.transform);
+  assert.ok(Math.abs(markerBefore[1] - (cardY + 58 / 2)) < 0.01, 'it started on the nominal centre: ' + markerBefore[1]);
+  assert.ok(Math.abs(markerAfter[1] - (cardY + 104 / 2)) < 0.01,
+    'and moved to the new one: ' + markerAfter[1] + ' (wanted ' + (cardY + 52) + ')');
 });

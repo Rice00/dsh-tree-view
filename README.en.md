@@ -33,7 +33,9 @@ Switch the conversation panel to Tree and the whole family is drawn on one canva
 
 | Feature | What it does |
 |---|---|
-| 🖱️ **Jump to a branch** | Every node is a real session version; clicking it moves you onto that line. Underneath it is only an archived flag being flipped: the version you clicked is unarchived back into the sidebar, and the one you were reading is archived into the tree — so moving around the tree moves the sidebar slot rather than adding to it. |
+| 🖱️ **Jump to a branch** | Every node is a real session version; clicking it moves you onto that line **and to that turn's message** (the rules are below). Underneath it is only an archived flag being flipped: the version you clicked is unarchived back into the sidebar, and the one you were reading is archived into the tree — so moving around the tree moves the sidebar slot rather than adding to it. |
+| 📍 **A "you are here" marker** | A small triangle in the tree points at the turn you are reading: it sits at the card's right edge, lined up with the card's vertical middle, keeps its size at every zoom, and re-centres when the card grows. It is still there after leaving the Tree or refreshing the page (the position is kept in browser storage). |
+| 🧭 **The view position is remembered** | Leaving the Tree and coming back keeps the pan and zoom you had (in memory only; a refresh forgets it). The toolbar's ⌖ frames the whole tree on demand. |
 | 🔀 **Parallel lines** | A version *is* a session. Right-click and send several of them "back into the main chat" — that step only unarchives, it touches nothing else — and two branches can work at the same time without disturbing each other; collect them again when you are done. |
 | 🧹 **One-click collect** | The panel toolbar's "collect every other branch" gathers the family's strays into the tree at once, leaving the one you are using. If any of them is still generating a reply it asks first — stop and collect, or cancel — so nothing is killed quietly. |
 | 🗂️ **Folding** | A run of turns with no fork in it — the opening every version shares included — folds into a single node once it reaches the configured length; click to unfold. The threshold is chosen in Settings, the toolbar folds it back at any time, and the view re-frames itself after either. |
@@ -45,6 +47,14 @@ Switch the conversation panel to Tree and the whole family is drawn on one canva
 | 🤖 **Subagent tags** | A subagent session hanging under this conversation carries a tag, so it is not read as one of your versions. |
 | 📦 **Archived branches stay** | A version you archive is still drawn, dimmed and marked "archived" — archiving takes an entry out of the sidebar, it does not delete a branch. |
 | 🎨 **Following the theme** | Surface, border, accent, state and even shadow colours come from the host's theme tokens: light follows light, dark follows dark. |
+
+## Jump rules
+
+- **A turn inside the version you are reading**: the Chat tab opens, the conversation scrolls to that turn and it flashes — the session is not reloaded, and no archive flag changes.
+- **A turn inside another version**: that version is switched to first (brought out of the archive if needed) and then the turn is located; the one you were reading is collected into the tree as usual.
+- **How it locates**: through the host's own turn rail — the marks down the right edge of a conversation. A turn already on screen is scrolled to directly; a turn that has never been loaded is fetched by the host first and then landed on, which is why it takes a moment and why distant turns work at all.
+- **The triangle follows the turn you clicked**: after a jump it points at that turn, and only hands the position back to the host's report once you scroll or type yourself (the host takes "current" to be the turn at its reading line, which is one short of the turn you asked for).
+- **A failed jump is not silent**: the attempt is retried a few times and then the route taken, and why it stopped, are written to the plugin's diagnostics log at `~/.dsh/storages/tree-view/logs/`.
 
 ## How it works
 

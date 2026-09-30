@@ -95,13 +95,39 @@ test('an overview drops what cannot be seen at that scale', () => {
     'and writes it only when it changes — a write per pan frame would recalculate style for every card');
 });
 
-test('the canvas size is kept, not read, so the sticky clamp never forces layout', () => {
-  const clamp = between('function positionGroupNames()', 'function renderFrame()');
+test('the canvas size is kept, not read, so the name clamp never forces layout', () => {
+  const clamp = between('function positionGroupNames()', 'function positionMarker()');
   // The clamp runs on every pan frame. It reads the remembered size first; the
   // direct read is only a fallback for a renderer whose observer never ran.
-  assert.match(clamp, /const height = graphSizeRef\.current\.h \|\| graphEl\.clientHeight \|\| 0;/,
-    'the sticky clamp prefers the remembered size and only falls back to reading');
+  assert.match(clamp, /const size = graphSizeRef\.current;/,
+    'the clamp takes the remembered size in one place');
+  assert.match(clamp, /const height = size\.h \|\| graphEl\.clientHeight \|\| 0;/,
+    'and prefers the remembered height, which is the band the name follows');
+  assert.match(clamp, /const width = size\.w \|\| graphEl\.clientWidth \|\| 0;/,
+    'the width too, which is what the sideways clamp needs');
+  assert.match(clamp, /const gap = 6 \/ scale;/,
+    'the insets are screen distances, so the name keeps them at every zoom');
+  assert.match(clamp, /el\.style\.transform = 'translate\(/,
+    'both axes are written as one transform, never as layout properties');
+  assert.match(clamp, /scale\(' \+ \(1 \/ scale\) \+ '\)/,
+    'and the counter-scale keeps the name the same size at every zoom');
+  assert.doesNotMatch(clamp, /offsetHeight|offsetWidth|getBoundingClientRect/,
+    'the clamp itself measures nothing — measureHeights does that off the frame');
   assert.match(code, /const graphSizeRef = React\.useRef\(\{ w: 0, h: 0 \}\);/, 'the size lives in a ref');
   assert.match(code, /new ResizeObserver\(remember\)/, 'a ResizeObserver keeps it up to date');
   assert.match(code, /const w = size\.w \|\| el\.clientWidth \|\| 600;/, 'the fit prefers the remembered size too');
+});
+
+test('the wheel can zoom out far enough to frame the whole tree', () => {
+  // The fit for an 87-card family sits at 0.116 while the wheel floor used to be 0.3, so a
+  // zoom-out gesture pushed inwards and the whole tree could never be brought into view by
+  // hand. The fit itself was never clamped: it is what decides what "the whole tree" means.
+  const limits = between('const MIN_SCALE', 'const CARD_W');
+  assert.match(limits, /const MIN_SCALE = 0\.01;/, 'the manual floor sits far below any fit');
+  assert.match(limits, /const MAX_SCALE = 1\.8;/, 'and there is still a ceiling');
+  const wheel = between("const onWheel = function", "el.addEventListener('wheel'");
+  assert.match(wheel, /Math\.min\(MAX_SCALE, Math\.max\(MIN_SCALE,/,
+    'the wheel uses those limits rather than numbers of its own');
+  assert.match(code, /const scale = Math\.min\(1, \(w - 70\) \/ Math\.max\(1, hi - lo\), \(h - 70\) \/ bot\);/,
+    'while the fit keeps deciding its own scale — no floor of its own to stop it framing the tree');
 });

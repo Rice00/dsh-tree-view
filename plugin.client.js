@@ -906,6 +906,16 @@ async function mutate(operation) {
   return body;
 }
 
+/**
+ * The last view position of each conversation, for the lifetime of the page.
+ *
+ * The host unmounts this view whenever the reader leaves the Tree tab, and coming back
+ * used to re-frame the whole tree from scratch — so a reader who had panned to one branch
+ * lost it every time they looked at the conversation. This is a position, not data: it
+ * lives in memory and is dropped with the page.
+ */
+const viewMemory = new Map();
+
 /* ---------------------------------------------------------------- utils -- */
 
 function contentText(content) {
@@ -964,11 +974,21 @@ function timeLabel(ms) {
 
 /* ---------------------------------------------------------- graph layout -- */
 
+// Zoom limits for the wheel. The fit is deliberately not clamped — it is what decides
+// what "the whole tree" means — so the manual floor has to sit far below it: measured on
+// an 87-card family the fit lands at 0.116, and the 0.3 this used to stop at made a
+// zoom-out gesture jump *inwards* instead of out.
+const MIN_SCALE = 0.01;
+const MAX_SCALE = 1.8;
+
 const CARD_W = 176;
 const CARD_H = 58;
 // A group frame is a card-sized padding plus a strip for its name.
 const GROUP_PAD = 14;
 const GROUP_HEAD = 20;
+// Where a group's name sits when it is not being clamped along its own branch —
+// the inset the stylesheet used before the clamp carried the position.
+const GROUP_NAME_INSET = 14;
 const SLOT_X = 206;
 const SLOT_Y = 132;
 // The birth animation is a cue, not a curtain: "this one branch grew out of that
@@ -1426,10 +1446,17 @@ function showChat() {
 }
 
 /**
- * After a graph click lands in a session, glide the chat to the version's own
- * message and flash it. Polls because the session view mounts asynchronously.
+ * Land the conversation on one turn and flash it.
+ *
+ * Polls because two things mount asynchronously: the session view (a click from the
+ * canvas switches to the Chat tab first) and, with it, the host's turn rail — which
+ * is why the rail is asked several times rather than once. Measured in the running
+ * app: asking only at the click found no rail at all, because the Chat view it lives
+ * in had not been mounted yet, and the jump quietly became a poll that could never
+ * succeed. The row itself is what decides when to flash, and its absence is what
+ * retries.
  */
-function flashTurn(sessionId, turn, tries) {
+function flashTurn(sessionId, turn, tries, nextRailAt) {
   const g = realGlobal();
   if (!g || !g.document) return;
   const el = g.document.querySelector(
@@ -1441,7 +1468,246 @@ function flashTurn(sessionId, turn, tries) {
     el.classList.add('mtx-flash');
     return;
   }
-  if (tries > 0) setTimeout(function () { flashTurn(sessionId, turn, tries - 1); }, 160);
+  // Four attempts, about 1.3s apart: far enough for the Chat view to mount, few
+  // enough that a host without a rail is not clicked at forever.
+  const railAt = nextRailAt === undefined ? tries : nextRailAt;
+  if (tries <= railAt && tries > railAt - 4 * 8) {
+    const result = jumpViaRail(turn);
+    remoteLog('info', 'jump: ' + sessionId + ' turn ' + turn + ' via ' + result.via);
+    if (tries > 0) setTimeout(function () { flashTurn(sessionId, turn, tries - 1, railAt - 8); }, 160);
+    return;
+  }
+  if (tries > 0) setTimeout(function () { flashTurn(sessionId, turn, tries - 1, railAt); }, 160);
+}
+
+/**
+ * The host's own turn rail, when this host has one.
+ *
+ * Down the right edge of a conversation DSH draws one mark per known turn; clicking
+ * a mark jumps to that turn, and for a turn that has never been loaded it asks the
+ * host for that page first and lands on the answer. That is exactly "go to this
+ * message" — including the part the canvas cannot do from the outside, because a
+ * turn that is not on screen is not in the DOM at all (the conversation is
+ * virtualised: three rows of a seventy-turn session were mounted when this was
+ * written).
+ *
+ * Found structurally, never by class name: the hashed CSS-module scope changes with
+ * every host build, but a mark is still a `button[data-index]` with a label, and the
+ * list of them still holds the marks.
+ */
+function turnRail() {
+  const g = realGlobal();
+  const doc = g && g.document;
+  if (!doc) return null;
+  const first = doc.querySelector('button[data-index][aria-label]');
+  if (!first || !first.parentElement) return null;
+  const list = first.parentElement;
+  let scroller = list.parentElement;
+  while (scroller && scroller !== doc.body) {
+    if (scroller.scrollHeight > scroller.clientHeight + 4) break;
+    scroller = scroller.parentElement;
+  }
+  return { list: list, scroller: scroller && scroller !== doc.body ? scroller : list.parentElement };
+}
+
+/** The turn a mark stands for, read off its label, or null when it carries none. */
+function markTurn(mark) {
+  const match = /(\d+)/.exec(mark.getAttribute('aria-label') || '');
+  return match ? Number(match[1]) : null;
+}
+
+function markFor(list, turn) {
+  const marks = list.querySelectorAll('button[data-index]');
+  for (let i = 0; i < marks.length; i++) {
+    if (markTurn(marks[i]) === turn) return marks[i];
+  }
+  return null;
+}
+
+/**
+ * Click the host's mark for one turn, scrolling the rail when it is showing another
+ * window of the conversation. Returns whether a mark was found — not whether the
+ * landing finished, which is what the polling in flashTurn watches for.
+ */
+function jumpViaRail(turn) {
+  const rail = turnRail();
+  if (!rail) return { found: false, via: 'no rail' };
+  let mark = markFor(rail.list, turn);
+  if (!mark && rail.scroller) {
+    const turns = [];
+    const marks = rail.list.querySelectorAll('button[data-index]');
+    for (let i = 0; i < marks.length; i++) {
+      const n = markTurn(marks[i]);
+      if (n !== null) turns.push(n);
+    }
+    if (turns.length) {
+      const lo = Math.min.apply(null, turns);
+      const hi = Math.max.apply(null, turns);
+      // The rail's pitch is fixed, so the fraction of the way along the turn range
+      // is the fraction of the way down the rail.
+      const span = Math.max(0, rail.scroller.scrollHeight - rail.scroller.clientHeight);
+      const frac = hi > lo ? (turn - lo) / (hi - lo) : 0;
+      rail.scroller.scrollTop = Math.max(0, Math.min(span, Math.round(frac * span)));
+      mark = markFor(rail.list, turn);
+    }
+  }
+  if (!mark) return { found: false, via: 'rail has no mark' };
+  mark.click();
+  return { found: true, via: 'rail' };
+}
+
+/**
+ * Land the conversation on one turn, then flash it — the whole of "go to this
+ * message", rail attempt and polling alike (see flashTurn).
+ *
+ * The turn that was asked for is also pinned as the reading position straight away:
+ * the host's rail reports the turn at its reading line, which a landing leaves one
+ * turn short of the target, so trusting it here lit up the wrong card (see
+ * watchReading for when the pin gives way).
+ */
+function jumpToTurn(sessionId, turn) {
+  reading.pin = { sessionId: sessionId, turn: turn };
+  reading.sessionId = sessionId;
+  reading.turn = turn;
+  rememberReading();
+  readingNotify();
+  flashTurn(sessionId, turn, 60);
+}
+
+/** The turn the host says the reader is on, from the rail's active mark. */
+function currentTurn() {
+  const g = realGlobal();
+  const doc = g && g.document;
+  if (!doc) return null;
+  const active = doc.querySelector('button[data-index][aria-current="true"]');
+  return active ? markTurn(active) : null;
+}
+
+/**
+ * Where the conversation is sitting, remembered across tabs.
+ *
+ * The host's rail is the source of this — it marks its active turn with
+ * `aria-current` — but the rail lives in the Chat view, and the Chat view is
+ * unmounted while the reader is looking at the Tree, which is exactly when the
+ * marker is wanted. Measured on a real host: reading it from the Tree's own effect
+ * found nothing at all, because there was no rail to read. So the position is kept
+ * here, updated whenever the rail is there, and survives the Chat going away.
+ *
+ * A null session means this host never told us which session it is showing (older
+ * hosts report no retention); the marker then matches on the turn alone.
+ */
+const reading = { sessionId: null, turn: null, pin: null, watchers: [] };
+
+function readingNotify() {
+  for (let i = 0; i < reading.watchers.length; i++) {
+    try { reading.watchers[i](); } catch (e) {}
+  }
+}
+
+/** Where the last known reading position is kept, so a refresh does not forget it. */
+const READING_KEY = 'dsh-tree-view:reading';
+
+function recallReading() {
+  const g = realGlobal();
+  try {
+    const raw = g && g.localStorage ? g.localStorage.getItem(READING_KEY) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.turn !== 'number') return null;
+    return { sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : null, turn: parsed.turn };
+  } catch (e) {
+    return null;
+  }
+}
+
+function rememberReading() {
+  const g = realGlobal();
+  try {
+    if (!g || !g.localStorage || reading.turn === null) return;
+    g.localStorage.setItem(READING_KEY, JSON.stringify({ sessionId: reading.sessionId, turn: reading.turn }));
+  } catch (e) {}
+}
+
+/** Watch the rail for as long as the plugin runs. Installed once, from the body. */
+function watchReading(sessions) {
+  const g = realGlobal();
+  const doc = g && g.document;
+  if (!doc) return undefined;
+  // A refresh forgets everything the rail ever said, and the position is wanted above
+  // all on the *first* open of the Tree — before the Chat view, which owns the rail,
+  // has mounted. Reported: after a refresh the marker was missing until the reader
+  // visited the Chat first.
+  const restored = recallReading();
+  if (restored) {
+    reading.sessionId = restored.sessionId;
+    reading.turn = restored.turn;
+  }
+  const read = function () {
+    const turn = currentTurn();
+    // The rail is not mounted: keep the last position rather than clearing it.
+    if (turn === null) return;
+    // A jump of our own wins until the reader moves the conversation themselves.
+    // The rail marks the turn at its reading line, and a landing leaves the turn that
+    // was asked for just below that line — which is why a jump used to light up the
+    // turn *before* the one that was clicked.
+    if (reading.pin) return;
+    const sessionId = sessions && sessions.mainSession ? sessions.mainSession() : null;
+    if (turn === reading.turn && sessionId === reading.sessionId) return;
+    reading.turn = turn;
+    reading.sessionId = sessionId;
+    rememberReading();
+    readingNotify();
+  };
+  const unpin = function () {
+    if (!reading.pin) return;
+    reading.pin = null;
+    read();
+  };
+  read();
+  // Any real gesture means the reader has taken over: the rail is right again.
+  doc.addEventListener('wheel', unpin, { capture: true, passive: true });
+  doc.addEventListener('keydown', unpin, { capture: true });
+  if (typeof g.MutationObserver !== 'function') {
+    return function () {
+      doc.removeEventListener('wheel', unpin, { capture: true });
+      doc.removeEventListener('keydown', unpin, { capture: true });
+    };
+  }
+  const observer = new g.MutationObserver(read);
+  observer.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ['aria-current'] });
+  return function () {
+    observer.disconnect();
+    doc.removeEventListener('wheel', unpin, { capture: true });
+    doc.removeEventListener('keydown', unpin, { capture: true });
+  };
+}
+
+/** The node the reading position points at, or null when it is elsewhere. */
+function hereNodeFrom(nodes, position) {
+  if (position.turn === null) return null;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (n.turn !== position.turn) continue;
+    // Matched per version: the turn number alone would light up another branch's turn
+    // of the same number.
+    if (position.sessionId === null ? n.current : position.sessionId === n.sessionId) return n;
+  }
+  return null;
+}
+
+/**
+ * Where the marker anchor sits for a card, and how much of the world's zoom it has to
+ * undo.
+ *
+ * The anchor is the card's right edge at its vertical middle — the tip of the
+ * triangle, which is what points at the node. The world scales with the view, so the
+ * marker counter-scales by the same factor: its size on screen then stays put at every
+ * zoom, and so do its own offsets inside the anchor, which are written in those screen
+ * units.
+ */
+function hereTransform(spring, height, scale) {
+  const k = scale > 0 ? 1 / scale : 1;
+  return 'translate(' + (spring.x + CARD_W / 2) + 'px,' + (spring.y + height / 2) + 'px) scale(' + k + ')';
 }
 
 /* ------------------------------------------------------------------ css -- */
@@ -1494,6 +1760,8 @@ const CSS = [
   '.mtx-graph[data-panning]{cursor:grabbing}',
   '.mtx-world{position:absolute;left:0;top:0}',
   '.mtx-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}',
+  // Branch names ride above the cards, and the marker above them.
+  '.mtx-names{position:absolute;left:0;top:0;width:0;height:0;z-index:2;pointer-events:none}',
   '.mtx-edge{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 45%,transparent);stroke-width:1.5}',
   '.mtx-edge[data-path]{stroke:var(--mtx-accent);stroke-width:2}',
   // Paint cost is what makes a big tree lag when the canvas is zoomed: the whole
@@ -1514,6 +1782,13 @@ const CSS = [
   // stays plain, which is what makes "where am I" readable. The node that is
   // literally the open session gets one extra ring so the exact spot is findable.
   '.mtx-card[data-current]{border-color:var(--mtx-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--mtx-accent) 55%,transparent),0 6px 22px color-mix(in srgb,var(--mtx-accent) 22%,transparent)}',
+  // Where the reader is: a triangle off the card's right edge, tip on the card's
+  // vertical middle. It cannot live on the card — the card clips its own painting
+  // (`contain: paint`), so anything drawn outside its box is never seen — so it is a
+  // sibling in the world layer, anchored to the card and counter-scaled, which is
+  // what keeps the triangle the same size at every zoom (see hereTransform).
+  '.mtx-here{position:absolute;left:0;top:0;width:0;height:0;z-index:3;transform-origin:0 0;pointer-events:none}',
+  '.mtx-here-tip{position:absolute;left:1px;top:-11px;overflow:visible;filter:drop-shadow(0 1px 2px var(--mtx-shadow))}',
   '.mtx-card[data-head]{box-shadow:0 0 0 2px var(--mtx-accent),0 8px 26px color-mix(in srgb,var(--mtx-accent) 34%,transparent)}',
   // Level of detail at overview scale. Scaled to fit, a card is a thumbnail: its
   // blurred shadow is sub-pixel and its subtitle is unreadable, and those two were
@@ -1546,7 +1821,7 @@ const CSS = [
   // floats, so a long title or subtitle never pushes it out of the way.
   '.mtx-card-tag{position:absolute;top:-8px;right:8px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:600;line-height:15px;color:var(--mtx-on-accent);background:var(--mtx-accent);box-shadow:0 1px 4px var(--mtx-shadow);white-space:nowrap}',
   '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--mtx-accent) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--mtx-accent) 7%,transparent);z-index:0;pointer-events:none}',
-  '.mtx-group-name{position:absolute;left:14px;top:-10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--mtx-accent);background:var(--mtx-surface);border:1px solid color-mix(in srgb,var(--mtx-accent) 45%,transparent)}',
+  '.mtx-group-name{position:absolute;left:0;top:0;transform-origin:0 0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--mtx-accent);background:var(--mtx-surface);border:1px solid color-mix(in srgb,var(--mtx-accent) 45%,transparent)}',
   '.mtx-menu{position:absolute;left:0;top:0;z-index:9;display:flex;flex-direction:column;min-width:148px;padding:4px;border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 10px 30px var(--mtx-shadow-strong)}',
   '.mtx-menu-item{appearance:none;border:0;background:transparent;text-align:left;font-family:inherit;font-size:12.5px;line-height:18px;padding:7px 10px;border-radius:8px;color:var(--dsw-alias-label-primary,#eee);cursor:pointer;white-space:nowrap}',
   '.mtx-menu-item:hover:not([disabled]){background:var(--dsw-alias-interactive-bg-hover,var(--mtx-line))}',
@@ -1645,6 +1920,11 @@ return {
     // Navigation is version-shaped and looked up lazily (see sessionNavigator);
     // refusing to boot here is what got this plugin deselected on 0.1.7.
     const sessions = sessionNavigator(ctx);
+
+    // The reader's position inside the conversation, tracked for as long as the
+    // plugin runs — the rail it comes from is unmounted with the Chat view while the
+    // Tree is on screen (see watchReading).
+    ctx.effect(function () { return watchReading(sessions); });
 
     // The list feeds the version ring and the subagent catalogue, so it is worth
     // subscribing to when it exists — but it is not worth refusing to boot over.
@@ -1746,6 +2026,7 @@ return {
         stopOnEditLabel: 'Stop the reply that is still being written',
         stopOnEditHint: 'Editing or retrying cancels every reply still being generated in that conversation — other versions included — before branching, so a superseded answer stops spending tokens. It also lets you edit mid-reply. Off leaves them running.',
         renamePrompt: 'Rename this branch',
+  hereHint: 'You are reading this turn',
         renameHint: 'Right-click to rename this branch',
         renameEmptyHint: 'Leave it empty to clear the name',
         renameFailed: 'Rename failed: {message}',
@@ -1816,6 +2097,7 @@ return {
         stopOnEditLabel: '先停掉还在生成的回复',
         stopOnEditHint: '编辑或重试时，先取消该会话里所有仍在生成的回复（含其它版本）再分支，避免被取代的回答继续消耗额度；同时允许在回复过程中直接编辑。关闭则让它们跑完。',
         renamePrompt: '重命名这个分支',
+  hereHint: '你正在读这一轮',
         renameHint: '右键重命名该分支',
         renameEmptyHint: '留空即清除名字',
         renameFailed: '重命名失败：{message}',
@@ -2279,9 +2561,20 @@ return {
       const cardEls = React.useRef(new Map());
       const edgeEls = React.useRef(new Map());
       const groupNameEls = React.useRef(new Map());
+      const hereRef = React.useRef(null);
       const renameErrorState = React.useState(null);
       const renameError = renameErrorState[0];
       const setRenameError = renameErrorState[1];
+      // The reading position comes from the shared store rather than from the DOM:
+      // the host's rail is gone by the time the reader is back on this map.
+      const [, forceReading] = React.useReducer(function (x) { return x + 1; }, 0);
+      React.useEffect(function () {
+        reading.watchers.push(forceReading);
+        return function () {
+          const at = reading.watchers.indexOf(forceReading);
+          if (at !== -1) reading.watchers.splice(at, 1);
+        };
+      }, []);
       // The rename editor is drawn inside the graph, not through window.prompt:
       // the Desktop shell does not implement prompt(), so a native dialog would
       // silently do nothing there. The pending draft lives in a ref as well as
@@ -2303,6 +2596,16 @@ return {
       const springs = React.useRef(new Map());
       const layoutRef = React.useRef(null);
       const viewRef = React.useRef({ x: 60, y: 42, scale: 1 });
+      // Written down when the view goes away — the host unmounts it on every tab switch —
+      // so the position survives leaving the Tree and coming back.
+      const viewMemoryKeyRef = React.useRef(sessionId);
+      React.useEffect(function () {
+        viewMemoryKeyRef.current = sessionId;
+        return function () {
+          const view = viewRef.current;
+          viewMemory.set(viewMemoryKeyRef.current, { x: view.x, y: view.y, scale: view.scale });
+        };
+      }, [sessionId]);
       const dragRef = React.useRef(null);
       const rafRef = React.useRef(0);
       const fittedRef = React.useRef(false);
@@ -2501,35 +2804,89 @@ return {
       }
 
       /**
-       * Keep every group name inside the visible band of its own frame.
+       * Keep every group name inside the visible band of its own frame, and lined up
+       * with it when the whole frame is in view.
        *
-       * A group can be thousands of world units tall (one branch of a long
-       * conversation is a long chain), so a name pinned to the frame's top edge
-       * scrolls away exactly when the reader is looking at the middle of the
-       * branch. The name is clamped to the visible part instead, the way a
-       * sticky header behaves.
+       * A group can be thousands of world units tall (one branch of a long conversation
+       * is a long chain), so a name pinned to the frame's own top edge scrolls away
+       * exactly when the reader is looking at the middle of the branch; it is clamped to
+       * the visible part instead, the way a sticky header behaves. Every distance here is
+       * a screen distance — the name is counter-scaled, so it keeps its size on screen —
+       * which is why following the view no longer makes it jump when the zoom changes.
        */
       function positionGroupNames() {
         const graphEl = graphRef.current;
         const view = viewRef.current;
         if (!graphEl) return;
-        // The canvas height comes from the ResizeObserver rather than a read here:
-        // this runs on every pan frame, and reading `clientHeight` after the
-        // transform was just written forces a layout each frame.
-        const height = graphSizeRef.current.h || graphEl.clientHeight || 0;
+        // The size comes from the ResizeObserver rather than a read here: this runs on
+        // every pan frame, and reading `clientHeight`/`clientWidth` after the transform
+        // was just written forces a layout each frame.
+        const size = graphSizeRef.current;
+        const height = size.h || graphEl.clientHeight || 0;
+        const width = size.w || graphEl.clientWidth || 0;
         if (height === 0) return;
-        const visibleTop = (-view.y) / view.scale;
-        const visibleBottom = visibleTop + height / view.scale;
+        const scale = view.scale > 0 ? view.scale : 1;
+        const visibleTop = (-view.y) / scale;
+        const visibleBottom = visibleTop + height / scale;
+        const visibleLeft = (-view.x) / scale;
+        const visibleRight = visibleLeft + (width || height) / scale;
+        // A name keeps its size on screen at every zoom — it is counter-scaled below —
+        // so the distances that hold it inside the view and inside its own frame are
+        // screen distances too, written here as the world units that come out of them,
+        // which is what the clamps compare.
+        const gap = 6 / scale;
+        const edge = 8 / scale;
         groupNameEls.current.forEach(function (entry) {
           const el = entry.el;
           if (!el) return;
-          const nameHeight = (entry.nameHeight || 20) / view.scale;
-          const minTop = 6;
-          const maxTop = Math.max(minTop, entry.height - nameHeight - 6);
-          const wanted = Math.max(visibleTop + 8, entry.top + minTop) - entry.top;
-          const clamped = Math.max(minTop, Math.min(Math.min(wanted, visibleBottom - nameHeight - 8 - entry.top), maxTop));
-          el.style.top = clamped + 'px';
+          // Measured in layout pixels, which the counter-scale turns back into world
+          // units of exactly this size.
+          const nameHeight = (entry.nameHeight || 20) / scale;
+          const nameWidth = (entry.nameWidth || 48) / scale;
+          // Down the branch the name follows the view, and rests on the frame's own top
+          // edge while that edge is on screen.
+          const minTop = gap;
+          const maxTop = Math.max(minTop, entry.height - nameHeight - gap);
+          const wanted = Math.max(visibleTop + edge, entry.top + minTop) - entry.top;
+          const y = entry.top + Math.max(minTop,
+            Math.min(Math.min(wanted, visibleBottom - nameHeight - edge - entry.top), maxTop));
+          // Sideways it rests on the frame's own left edge — a name lines up with the area
+          // it names — and the follower only lifts it back into view once that edge has
+          // scrolled off to the left.
+          let x = entry.left;
+          if (width > 0 && entry.width) {
+            const maxLeft = Math.max(0, entry.width - nameWidth);
+            const wantedLeft = Math.max(visibleLeft + edge, entry.left) - entry.left;
+            x = entry.left + Math.max(0,
+              Math.min(Math.min(wantedLeft, visibleRight - nameWidth - edge - entry.left), maxLeft));
+          }
+          // One write for both axes, and the counter-scale that keeps the name the size
+          // it is at 100% at any zoom.
+          el.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + (1 / scale) + ')';
         });
+        // The marker's counter-scale depends on the zoom too, and a zoom is not a
+        // spring frame — so positioning it only from renderFrame left it a zoom behind
+        // (measured in the app: the world at 0.59 while the triangle still carried the
+        // counter-scale for 0.3, which made it grow on screen).
+        positionMarker();
+      }
+
+
+      /**
+       * Put the reading marker on its card, sized for the zoom on screen.
+       *
+       * Called from the frame that positions the names, and again from renderFrame so
+       * it follows its card while the springs move it.
+       */
+      function positionMarker() {
+        const marker = hereRef.current;
+        if (!marker) return;
+        const id = marker.getAttribute('data-node');
+        const lay = layoutRef.current;
+        if (!id || !lay) return;
+        const s = springs.current.get(id) || lay.pos.get(id);
+        if (!s) return;
+        marker.style.transform = hereTransform(s, cardHeights.current.get(id) || CARD_H, viewRef.current.scale);
       }
 
       function renderFrame() {
@@ -2551,6 +2908,10 @@ return {
           const h = cardHeights.current.get(e.from) || CARD_H;
           el.setAttribute('d', edgePath(a.x, a.y + h, b.x, b.y));
         }
+        // The reading marker is positioned with the card it points at, and follows it
+        // while the springs move it — the names' own pass has already set its size for
+        // this zoom (see positionMarker).
+        positionMarker();
       }
 
       /**
@@ -2586,7 +2947,9 @@ return {
           });
           groupNameEls.current.forEach(function (entry) {
             const h = entry.el && entry.el.offsetHeight;
+            const w = entry.el && entry.el.offsetWidth;
             entry.nameHeight = h || entry.nameHeight || 20;
+            entry.nameWidth = w || entry.nameWidth || 48;
           });
           renderFrame();
         };
@@ -2602,6 +2965,29 @@ return {
         }
       }
 
+      /**
+       * Keep the marker centred after the card it points at changes height.
+       *
+       * A card is not a fixed box: a folded node expands, a subtitle wraps to its second
+       * line, the host's font finishes loading. The measured heights arrive once per
+       * layout, so a card that grew left the marker on the old centre — reported as the
+       * triangle sitting off-centre on an expanded node.
+       */
+      React.useEffect(function () {
+        const g = realGlobal();
+        const marker = hereRef.current;
+        if (!g || !marker || typeof g.ResizeObserver !== 'function') return undefined;
+        const id = marker.getAttribute('data-node');
+        const card = id ? cardEls.current.get(id) : null;
+        if (!card) return undefined;
+        const observer = new g.ResizeObserver(function () {
+          const h = card.offsetHeight;
+          if (h) cardHeights.current.set(id, h);
+          positionMarker();
+        });
+        observer.observe(card);
+        return function () { observer.disconnect(); };
+      }, [reading.turn, reading.sessionId]);
       function kick() {
         if (rafRef.current) return;
         let last = 0;
@@ -2681,7 +3067,12 @@ return {
         springs.current.forEach(function (_, id) { if (!alive.has(id)) springs.current.delete(id); });
         if (!fittedRef.current && lay.pos.size > 0) {
           fittedRef.current = true;
-          fitView();
+          // Coming back to a conversation puts the reader where they left it (see
+          // viewMemory); the first visit to a tree frames it, and the toolbar's ⌖ reframes
+          // on demand.
+          const remembered = viewMemory.get(sessionId);
+          if (remembered) viewRef.current = { x: remembered.x, y: remembered.y, scale: remembered.scale };
+          else fitView();
         } else if (fitAfterLayoutRef.current) {
           // A fold or unfold just changed how much tree there is: frame it, the
           // way the toolbar's ⌖ does, so the tree stays where the reader is
@@ -2741,7 +3132,7 @@ return {
           const rect = el.getBoundingClientRect();
           const mx = ev.clientX - rect.left;
           const my = ev.clientY - rect.top;
-          const next = Math.min(1.8, Math.max(0.3, view.scale * Math.exp(-ev.deltaY * 0.0013)));
+          const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.scale * Math.exp(-ev.deltaY * 0.0013)));
           const f = next / view.scale;
           view.x = mx - (mx - view.x) * f;
           view.y = my - (my - view.y) * f;
@@ -2774,7 +3165,7 @@ return {
         if (alreadyOnScreen) {
           remoteLog('info', 'click: already on screen (' + (onScreen !== null ? 'app says ' + onScreen : 'prop') + ') — no switch');
           showChat();
-          if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
+          if (typeof node.turn === 'number' && node.turn > 0) jumpToTurn(node.sessionId, node.turn);
           return;
         }
         // Anything else is a swap: a version that is collected in the tree comes
@@ -2788,7 +3179,7 @@ return {
         // — the report "it flashes the new conversation, then jumps to the target".
         const reveal = function () {
           showChat();
-          if (typeof node.turn === 'number' && node.turn > 0) flashTurn(node.sessionId, node.turn, 45);
+          if (typeof node.turn === 'number' && node.turn > 0) jumpToTurn(node.sessionId, node.turn);
         };
         if (sessions.whenMain) sessions.whenMain(v.sessionId, reveal);
         else reveal();
@@ -2879,9 +3270,23 @@ return {
         const version = versions.find(function (item) { return item.sessionId === draft.sessionId; });
         const current = (version && version.label) || '';
         if (next === current) return;
+        // Show the new name now, not after the host has rebuilt the family. The
+        // answer carries the label the host actually applied — it normalizes what it
+        // stores — so the optimistic value is corrected from it rather than assumed,
+        // and a refusal puts the old name back.
+        //
+        // Nothing is invalidated here on purpose: the answer is already the
+        // authoritative name, and a refresh kicked off at this moment could be one
+        // that started before the rename and would put the old name back on screen.
+        // The family ages out on its own schedule like any other entry.
+        treeStore.patchVersion(draft.sessionId, draft.sessionId, { label: next });
         mutate({ action: 'label', sessionId: draft.sessionId, label: next })
-          .then(function () { treeStore.load(sessionId); })
+          .then(function (result) {
+            const applied = result && typeof result.label === 'string' ? result.label : next;
+            treeStore.patchVersion(draft.sessionId, draft.sessionId, { label: applied });
+          })
           .catch(function (error) {
+            treeStore.patchVersion(draft.sessionId, draft.sessionId, { label: current });
             const message = error && error.message ? error.message : String(error);
             setRenameError(t('renameFailed', { message: message }));
             remoteLog('warn', 'branch rename failed', error);
@@ -3024,18 +3429,41 @@ return {
         onPointerCancel: onPointerUp,
       },
         React.createElement('div', { className: 'mtx-world', ref: worldRef },
+          // The reading marker: one anchor element, positioned against the card it
+          // points at (see renderFrame), with the triangle inside it so the triangle
+          // can be counter-scaled against the world. Rendered only when the reader's
+          // turn is in this tree.
+          (function () {
+            const node = hereNodeFrom(turnNodes, reading);
+            if (!node) return null;
+            const s = springs.current.get(node.id) || layout.pos.get(node.id);
+            const h = cardHeights.current.get(node.id) || CARD_H;
+            return React.createElement('div', {
+              className: 'mtx-here',
+              ref: hereRef,
+              'data-node': node.id,
+              title: t('hereHint'),
+              style: s ? { transform: hereTransform(s, h, viewRef.current.scale) } : undefined,
+            }, React.createElement('svg', {
+              className: 'mtx-here-tip',
+              width: 16, height: 22, viewBox: '0 0 16 22', 'aria-hidden': 'true',
+            },
+              // A solid rounded triangle: the round join of a thick stroke is what gives it
+              // corners (a border triangle cannot), and the soft shadow in the stylesheet
+              // keeps it off the canvas without a gradient or a highlight line.
+              React.createElement('path', {
+                d: 'M13 2.5 L5 11 L13 19.5 Z',
+                fill: 'var(--mtx-accent)',
+                stroke: 'var(--mtx-accent)', strokeWidth: 3.4, strokeLinejoin: 'round', strokeLinecap: 'round',
+              })
+            ));
+          })(),
           groupBoxes.map(function (g) {
             return React.createElement('div', {
               key: g.key,
               className: 'mtx-group',
               style: { transform: 'translate(' + g.left + 'px,' + g.top + 'px)', width: g.width + 'px', height: g.height + 'px' },
-            }, React.createElement('span', {
-              className: 'mtx-group-name',
-              ref: function (el) {
-                if (el) groupNameEls.current.set(g.key, { el: el, top: g.top, height: g.height });
-                else groupNameEls.current.delete(g.key);
-              },
-            }, g.label));
+            });
           }),
           React.createElement('svg', { className: 'mtx-edges' },
             layout.edges.map(function (e) {
@@ -3113,6 +3541,34 @@ return {
               n.subagent ? React.createElement('span', { className: 'mtx-card-tag' }, t('subagentTag')) : null
             );
           }),
+          // The branch names live in their own layer *above* the cards. Inside the frame
+          // they were painted under them — a card is positioned with its own stacking
+          // context — so a name disappeared exactly when the sticky follower moved it
+          // over the cards, which is most of the time on a tall branch. The layer takes
+          // no pointer events, so the cards underneath stay clickable.
+          React.createElement('div', { className: 'mtx-names' },
+            groupBoxes.map(function (g) {
+              return React.createElement('span', {
+                key: g.key,
+                className: 'mtx-group-name',
+                // An initial position, so the first paint puts the name on its frame
+                // instead of at the world origin — the frame that positions it comes a
+                // moment later.
+                style: { transform: 'translate(' + g.left + 'px,' + g.top + 'px)' },
+                ref: function (el) {
+                  if (!el) { groupNameEls.current.delete(g.key); return; }
+                  // Measurements survive a re-render: the element is replaced, and
+                  // dropping them would make both clamps fall back to guessed sizes
+                  // until the next measurement pass.
+                  const prev = groupNameEls.current.get(g.key);
+                  groupNameEls.current.set(g.key, {
+                    el: el, top: g.top, left: g.left, height: g.height, width: g.width,
+                    nameHeight: prev && prev.nameHeight, nameWidth: prev && prev.nameWidth,
+                  });
+                },
+              }, g.label);
+            })
+          ),
           // The rename editor renders inside the world so it inherits the same
           // pan/zoom transform as the card it replaces.
           renaming === null ? null : (function () {
