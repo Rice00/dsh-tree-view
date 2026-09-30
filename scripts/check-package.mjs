@@ -22,11 +22,19 @@ try {
   const required = new Set([
     pkg.main, 'lib/client.js', 'lib/log.js', 'lib/tree-logic.js', 'lib/session-record.js', 'plugin.client.js',
     'cordis.patch.yml', 'package.json', 'LICENSE', 'NOTICE',
+    // The panel icon is read from the installed package, so it has to be in the tarball —
+    // and the host refuses anything over 256 KiB, which is why the icon is its own small
+    // file rather than the README's logo.
+    pkg.icon, 'assets/logo.png', 'assets/screenshot-tree.png', 'assets/screenshot-ring.png',
     ...Object.values(pkg.exports).map(entry => typeof entry === 'string' ? entry : entry.default),
   ]);
   for (const path of required) {
     assert.ok(files.get(path.replace(/^\.\//, '')) > 0, `Missing or empty package file: ${path}`);
   }
+  const icon = files.get(pkg.icon.replace(/^\.\//, ''));
+  assert.ok(icon <= 256 * 1024, `Icon exceeds the host's 256 KiB limit: ${icon} bytes`);
+  assert.match(pkg.icon, /^\.\/[^/].*\.(svg|png|jpg|jpeg|webp)$/,
+    'The icon must be a package-relative path to an image the host accepts');
   assert.ok(![...files.keys()].some(path => /^(node_modules|test|\.github|\.git)\//.test(path)),
     'Development files must not ship in the package');
   console.log(`Package verified: ${pack.filename}; ${files.size} files; all runtime entries present.`);

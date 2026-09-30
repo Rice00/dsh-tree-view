@@ -1,6 +1,6 @@
 {
   "name": "dsh-tree-view",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Tree-view conversation branching for DeepSeek Harness: keep one entry in the sidebar, branch and switch versions inside a tree, promote a branch to a formal session, and rename branches. A fork of dsh-plugin-message-edit (MIT).",
   "type": "module",
   "main": "lib/index.js",
@@ -14,12 +14,17 @@
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
+  "icon": "./assets/icon.png",
   "files": [
     "lib",
     "docs",
     "cordis.patch.yml",
     "plugin.client.js",
-    "NOTICE"
+    "NOTICE",
+    "assets/icon.png",
+    "assets/logo.png",
+    "assets/screenshot-ring.png",
+    "assets/screenshot-tree.png"
   ],
   "license": "MIT",
   "author": "Rice00",
