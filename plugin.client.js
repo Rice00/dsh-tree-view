@@ -1574,6 +1574,29 @@ function jumpToTurn(sessionId, turn) {
   flashTurn(sessionId, turn, 60);
 }
 
+/**
+ * The last turn the chat is showing.
+ *
+ * This is what "sitting at the bottom" means when the rail says nothing: the last turn on
+ * screen is where the reader is, even if they have not scrolled past it yet. Measured live
+ * on a conversation at the bottom, the rail reported its last turn and nothing was ever
+ * written down — so the fallback is not only for a silent rail, it is the safety net for a
+ * position that never changes.
+ */
+function visibleTurn() {
+  const g = realGlobal();
+  const doc = g && g.document;
+  if (!doc || !doc.querySelectorAll) return null;
+  const rows = doc.querySelectorAll('.mtx-row[data-turn]');
+  let last = null;
+  for (let i = 0; i < rows.length; i++) {
+    const turn = Number(rows[i].getAttribute('data-turn'));
+    if (!isFinite(turn)) continue;
+    if (last === null || turn > last) last = turn;
+  }
+  return last;
+}
+
 /** The turn the host says the reader is on, from the rail's active mark. */
 function currentTurn() {
   const g = realGlobal();
@@ -1620,11 +1643,100 @@ function recallReading() {
   }
 }
 
+/**
+ * The same position, per conversation.
+ *
+ * One global slot was wrong. The rail reports the turn being read in whatever
+ * conversation is open, so visiting another one overwrote the only slot there was — and
+ * the family the reader came back to had no turn to point at, which showed up twice as
+ * "the marker disappeared". The map is bounded: a page can stay open for weeks.
+ */
+const READING_BY_KEY = 'dsh-tree-view:reading-by-session';
+const READING_KEEP = 30;
+const readingBy = new Map();
+let readingByLoaded = false;
+
+function loadReadingBy() {
+  if (readingByLoaded) return;
+  readingByLoaded = true;
+  const g = realGlobal();
+  try {
+    const raw = g && g.localStorage ? g.localStorage.getItem(READING_BY_KEY) : null;
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const by = parsed && parsed.by;
+    if (!by || typeof by !== 'object') return;
+    Object.keys(by).forEach(function (id) {
+      const entry = by[id];
+      if (entry && typeof entry.turn === 'number') readingBy.set(id, { turn: entry.turn, at: Number(entry.at) || 0 });
+    });
+  } catch (e) {}
+}
+
+function saveReadingBy() {
+  const g = realGlobal();
+  try {
+    if (!g || !g.localStorage) return;
+    const keep = [...readingBy.entries()]
+      .sort(function (a, b) { return b[1].at - a[1].at; })
+      .slice(0, READING_KEEP);
+    readingBy.clear();
+    const by = {};
+    keep.forEach(function (kv) { readingBy.set(kv[0], kv[1]); by[kv[0]] = kv[1]; });
+    g.localStorage.setItem(READING_BY_KEY, JSON.stringify({ v: 2, by: by }));
+  } catch (e) {}
+}
+
+/** The newest position read in any of these conversations, if there is one. */
+function recallReadingFor(sessionIds) {
+  loadReadingBy();
+  let best = null;
+  sessionIds.forEach(function (id) {
+    const entry = id ? readingBy.get(id) : null;
+    if (entry && (!best || entry.at > best.at)) best = { sessionId: id, turn: entry.turn, at: entry.at };
+  });
+  return best ? { sessionId: best.sessionId, turn: best.turn } : null;
+}
+
+/**
+ * Which conversation the rail is reporting for.
+ *
+ * The app writes the open session into its own storage, the chat rows in the document
+ * name it, and the session list knows it when retention is on — in that order, because
+ * the first is always there and the last is the one that used to come back null.
+ */
+function openSessionId(sessions) {
+  const g = realGlobal();
+  try {
+    const raw = g && g.localStorage ? g.localStorage.getItem('dsh.sessions.current') : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const id = typeof parsed === 'string' ? parsed : (parsed && (parsed.id || parsed.sessionId));
+      if (typeof id === 'string' && id) return id;
+    }
+  } catch (e) {}
+  const doc = g && g.document;
+  const row = doc && doc.querySelector ? doc.querySelector('.mtx-row[data-session]') : null;
+  if (row) {
+    const id = row.getAttribute('data-session');
+    if (id) return id;
+  }
+  return sessions && sessions.mainSession ? sessions.mainSession() : null;
+}
+
 function rememberReading() {
   const g = realGlobal();
   try {
     if (!g || !g.localStorage || reading.turn === null) return;
     g.localStorage.setItem(READING_KEY, JSON.stringify({ sessionId: reading.sessionId, turn: reading.turn }));
+    // Scoped when we can say which conversation this was; the single slot above stays for
+    // readers upgrading from an older build.
+    if (!reading.sessionId) reading.sessionId = openSessionId(null);
+    if (reading.sessionId) {
+      loadReadingBy();
+      readingBy.set(reading.sessionId, { turn: reading.turn, at: Date.now() });
+      saveReadingBy();
+    }
   } catch (e) {}
 }
 
@@ -1643,15 +1755,18 @@ function watchReading(sessions) {
     reading.turn = restored.turn;
   }
   const read = function () {
-    const turn = currentTurn();
-    // The rail is not mounted: keep the last position rather than clearing it.
+    const marked = currentTurn();
+    // A silent rail still means something when a conversation is on screen: at its bottom
+    // the reader is on the last turn there is. (The rail being *unmounted* is different —
+    // then `.mtx-row` is gone too and this returns null, which keeps the last position.)
+    const turn = marked === null ? visibleTurn() : marked;
     if (turn === null) return;
     // A jump of our own wins until the reader moves the conversation themselves.
     // The rail marks the turn at its reading line, and a landing leaves the turn that
     // was asked for just below that line — which is why a jump used to light up the
     // turn *before* the one that was clicked.
     if (reading.pin) return;
-    const sessionId = sessions && sessions.mainSession ? sessions.mainSession() : null;
+    const sessionId = openSessionId(sessions);
     if (turn === reading.turn && sessionId === reading.sessionId) return;
     reading.turn = turn;
     reading.sessionId = sessionId;
@@ -1663,26 +1778,109 @@ function watchReading(sessions) {
     reading.pin = null;
     read();
   };
+  // Reading the rail is cheap but not free, and a streaming reply mutates the document for
+  // every token. One read per 250ms, with a trailing one so the last change is never lost.
+  let lastReadAt = 0;
+  let readTimer = null;
+  const readSoon = function () {
+    const now = Date.now();
+    const wait = 250 - (now - lastReadAt);
+    if (wait <= 0) {
+      lastReadAt = now;
+      read();
+      return;
+    }
+    if (readTimer !== null) return;
+    readTimer = setTimeout(function () {
+      readTimer = null;
+      lastReadAt = Date.now();
+      read();
+    }, wait);
+  };
+  const onGesture = function () {
+    unpin();
+    readSoon();
+  };
   read();
-  // Any real gesture means the reader has taken over: the rail is right again.
-  doc.addEventListener('wheel', unpin, { capture: true, passive: true });
-  doc.addEventListener('keydown', unpin, { capture: true });
+  // Any real gesture means the reader has taken over: the rail is right again. `scroll` does
+  // not bubble, so this listens in the capture phase — the conversation scrolls in its own
+  // element, and a scrollbar drag is not a wheel event.
+  doc.addEventListener('wheel', onGesture, { capture: true, passive: true });
+  doc.addEventListener('keydown', onGesture, { capture: true });
+  doc.addEventListener('scroll', onGesture, { capture: true, passive: true });
   if (typeof g.MutationObserver !== 'function') {
     return function () {
-      doc.removeEventListener('wheel', unpin, { capture: true });
-      doc.removeEventListener('keydown', unpin, { capture: true });
+      doc.removeEventListener('wheel', onGesture, { capture: true });
+      doc.removeEventListener('keydown', onGesture, { capture: true });
+      doc.removeEventListener('scroll', onGesture, { capture: true });
     };
   }
-  const observer = new g.MutationObserver(read);
-  observer.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ['aria-current'] });
+  // The rail can arrive with its active mark already in place — a fresh mount after a
+  // restart, the bottom of a conversation where nothing moves, a one-turn conversation —
+  // and an attribute filter never sees an element arrive, only an attribute change. That is
+  // exactly why the marker was missing until the reader scrolled: scrolling moves the mark,
+  // which *is* an attribute change. Watching the tree as well covers the other case.
+  const observer = new g.MutationObserver(function (records) {
+    // The active mark moving is the exact signal, and it is rare: read it at once. A rail
+    // arriving is a childList change, and so is every token of a streaming reply — those go
+    // through the throttle instead.
+    for (let i = 0; i < records.length; i++) {
+      if (records[i].type === 'attributes') {
+        lastReadAt = Date.now();
+        read();
+        return;
+      }
+    }
+    readSoon();
+  });
+  observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-current'] });
   return function () {
     observer.disconnect();
-    doc.removeEventListener('wheel', unpin, { capture: true });
-    doc.removeEventListener('keydown', unpin, { capture: true });
+    if (readTimer !== null) clearTimeout(readTimer);
+    doc.removeEventListener('wheel', onGesture, { capture: true });
+    doc.removeEventListener('keydown', onGesture, { capture: true });
+    doc.removeEventListener('scroll', onGesture, { capture: true });
   };
 }
 
 /** The node the reading position points at, or null when it is elsewhere. */
+/**
+ * The card that stands for a reading position.
+ *
+ * A position is a turn number, and a tree does not draw every turn: a stretch with no fork
+ * in it folds into a single card, and the rail reports the turn at its reading line
+ * whether or not that turn has a card of its own. Measured on a running host: the rail sat
+ * on turn 86 of a version whose cards stop at 75 and resume at 88, because 76-87 were
+ * folded — so an exact match alone left the tree unmarked, which is the other half of
+ * "the marker disappeared".
+ *
+ * So: what the rail last said, or the newest position read in any version of this family;
+ * then the folded card that contains the turn; then the last card the reader has passed.
+ */
+function readingNodeIn(nodes) {
+  const live = hereNodeFrom(nodes, reading);
+  if (live) return live;
+  const remembered = recallReadingFor(nodes.map(function (n) { return n.sessionId; }));
+  const wanted = remembered || reading;
+  if (wanted.turn === null) return null;
+  const exact = hereNodeFrom(nodes, wanted);
+  if (exact) return exact;
+  const line = nodes.filter(function (n) {
+    return wanted.sessionId === null ? n.current : n.sessionId === wanted.sessionId;
+  });
+  for (let i = 0; i < line.length; i++) {
+    const n = line[i];
+    if (n.fold && n.foldFromTurn <= wanted.turn && wanted.turn <= n.foldToTurn) return n;
+  }
+  let passed = null;
+  for (let i = 0; i < line.length; i++) {
+    const n = line[i];
+    if (n.turn === null || n.turn > wanted.turn) continue;
+    if (!passed || n.turn > passed.turn) passed = n;
+  }
+  return passed;
+}
+
 function hereNodeFrom(nodes, position) {
   if (position.turn === null) return null;
   for (let i = 0; i < nodes.length; i++) {
@@ -1820,6 +2018,15 @@ const CSS = [
   // where it can always be seen: a small accent tag on the card's top edge. It
   // floats, so a long title or subtitle never pushes it out of the way.
   '.mtx-card-tag{position:absolute;top:-8px;right:8px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:600;line-height:15px;color:var(--mtx-on-accent);background:var(--mtx-accent);box-shadow:0 1px 4px var(--mtx-shadow);white-space:nowrap}',
+  // ...and the card has to let it out. `content-visibility:auto` implies paint
+  // containment and `contain:content` (layout paint style) keeps it, so a card clips
+  // its contents to its padding box — and the tag is 8 world units above that box.
+  // Measured on a real subagent card at scale 0.835: 6.7 of the tag's 14.2 screen
+  // units were never painted (the top half of every glyph), and elementFromPoint in
+  // that band returned the canvas, not the tag. Containment is what makes a large
+  // family cheap to draw (94ms → 5ms on 73 cards), so it stays wherever it can: only
+  // the cards that actually carry a tag give it up, and those are the few.
+  '.mtx-card[data-subagent]{contain:layout style;content-visibility:visible}',
   '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--mtx-accent) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--mtx-accent) 7%,transparent);z-index:0;pointer-events:none}',
   '.mtx-group-name{position:absolute;left:0;top:0;transform-origin:0 0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--mtx-accent);background:var(--mtx-surface);border:1px solid color-mix(in srgb,var(--mtx-accent) 45%,transparent)}',
   '.mtx-menu{position:absolute;left:0;top:0;z-index:9;display:flex;flex-direction:column;min-width:148px;padding:4px;border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 10px 30px var(--mtx-shadow-strong)}',
@@ -3434,7 +3641,7 @@ return {
           // can be counter-scaled against the world. Rendered only when the reader's
           // turn is in this tree.
           (function () {
-            const node = hereNodeFrom(turnNodes, reading);
+            const node = readingNodeIn(turnNodes);
             if (!node) return null;
             const s = springs.current.get(node.id) || layout.pos.get(node.id);
             const h = cardHeights.current.get(node.id) || CARD_H;

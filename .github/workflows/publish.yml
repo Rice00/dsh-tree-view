@@ -1,0 +1,56 @@
+name: Publish
+
+# Releases are published from here, not from a laptop.
+#
+# npm no longer issues long-lived publishing credentials: write tokens are capped at
+# 90 days, and the ones that bypass 2FA lose direct publishing in January 2027. This
+# workflow is the replacement. npm accepts it through a trusted publisher (OIDC), so
+# the only credential is a token that lives for the single job, cannot be extracted,
+# and needs no rotation.
+#
+# The configuration that makes it work lives at
+# https://www.npmjs.com/package/dsh-tree-view/settings under "Trusted publishing":
+# GitHub Actions, Rice00/dsh-tree-view, workflow filename "publish.yml", with direct
+# publishing allowed. That filename is part of the trust: renaming this file, or
+# calling publish from another workflow, stops it from being able to publish.
+#
+# Push a release tag (v1.2.3) and this runs. A manual run is the retry path, and it
+# checks nothing about tags — it publishes whatever version is in package.json.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # the OIDC token npm exchanges for a short-lived publish token
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false # an upload already under way is never cancelled
+
+jobs:
+  publish:
+    name: npm publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false # a release build never reuses a cache
+      # Publishing over OIDC needs npm 11.5.1 or later, and which npm a Node image
+      # happens to bundle is not something a release should bet on.
+      - run: npm install -g npm@11
+      - run: npm --version
+      - run: npm ci
+      - name: The tag and the package version must agree
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node -e "const p = require('./package.json'); const tag = process.env.GITHUB_REF_NAME; if ('v' + p.version !== tag) { console.error('tag ' + tag + ' does not match package.json ' + p.version); process.exit(1); } console.log('publishing ' + p.name + ' ' + p.version + ' from ' + tag);"
+      - run: npm test
+      - run: npm publish

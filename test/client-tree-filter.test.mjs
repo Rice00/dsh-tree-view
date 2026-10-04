@@ -522,6 +522,22 @@ test('and marks one the host half has not learned about yet', async (t) => {
   assert.ok(card.textContent.includes('subagent'), 'tag and subtitle: ' + card.textContent);
 });
 
+test('a card does not clip away the tag it carries', () => {
+  // The tag rides 8 world units above the card's top edge, and a card clips its own
+  // contents: `content-visibility:auto` implies paint containment and
+  // `contain:content` (layout paint style) keeps it. Measured in the running app on a
+  // real subagent card at scale 0.835 — the tag's box was 14.2 screen units tall and
+  // the top 6.7 of them were never painted, so 子代理 read as its own bottom halves,
+  // and elementFromPoint in that band returned the canvas. jsdom models no clipping,
+  // so this guard is on the stylesheet that the browser is actually given.
+  assert.ok(bundle.includes('.mtx-card-tag{position:absolute;top:-8px;right:8px'),
+    'the tag still rides the card\'s top edge instead of being moved inside it');
+  assert.ok(bundle.includes('.mtx-card[data-subagent]{contain:layout style;content-visibility:visible}'),
+    'a tagged card gives up paint containment, which is the only thing that can clip the tag');
+  assert.ok(bundle.includes('contain:layout paint style;content-visibility:auto'),
+    'every other card keeps its containment — this is a per-card exemption, not a rule-wide one');
+});
+
 // 30 turns on the conversation with one small fork at turn 5: the shared history
 // is turns 1..4, and turns 6..29 are an unbranched run. Long enough that folding
 // it changes how much there is to see.
@@ -1261,4 +1277,100 @@ test('the marker re-centres when its card changes height', async (t) => {
   assert.ok(Math.abs(markerBefore[1] - (cardY + 58 / 2)) < 0.01, 'it started on the nominal centre: ' + markerBefore[1]);
   assert.ok(Math.abs(markerAfter[1] - (cardY + 104 / 2)) < 0.01,
     'and moved to the new one: ' + markerAfter[1] + ' (wanted ' + (cardY + 52) + ')');
+});
+
+test('a position read in another conversation does not hide this family marker', async (t) => {
+  // Reported twice as "the marker disappeared": the position was kept in one slot for the
+  // whole page, so the turn the rail reported for whatever conversation was open
+  // overwrote it — and the family the reader came back to had no turn of that number,
+  // which left the tree unmarked. Each conversation keeps its own position now.
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root', {}, 'legacy', {
+    'dsh-tree-view:reading': JSON.stringify({ sessionId: 'session-elsewhere', turn: 999 }),
+    'dsh-tree-view:reading-by-session': JSON.stringify({ v: 2, by: { 'session-root': { turn: 5, at: 1000 } } }),
+  });
+  const doc = view.dom.window.document;
+  const marker = doc.querySelector('.mtx-here');
+  assert.ok(marker, 'the marker is drawn from this family own remembered position');
+  assert.equal(marker.getAttribute('data-node'), 'session-root#t5',
+    'pointing at the turn this family was last read at, not the stale global one');
+});
+
+test('the rail report is written down per conversation', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, undefined, 'session-root', {}, 'legacy', {
+    'dsh.sessions.current': JSON.stringify({ sessionId: 'session-elsewhere' }),
+  });
+  const doc = view.dom.window.document;
+  fakeRail(doc, [4, 5, 6], null);
+  const mark = [...doc.querySelectorAll('button[data-index]')].find((el) => el.getAttribute('aria-label') === '跳转到第 5 轮');
+  await act(async () => {
+    mark.setAttribute('aria-current', 'true');
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  const by = JSON.parse(doc.defaultView.localStorage.getItem('dsh-tree-view:reading-by-session') || 'null');
+  assert.ok(by && by.by && by.by['session-elsewhere'], 'the open conversation is named in the key: ' + JSON.stringify(by));
+  assert.equal(by.by['session-elsewhere'].turn, 5, 'and the turn is written under it');
+  const legacy = JSON.parse(doc.defaultView.localStorage.getItem('dsh-tree-view:reading') || 'null');
+  assert.equal(legacy.turn, 5, 'the older single-slot key is still written, for readers upgrading from 1.2.0');
+});
+
+test('a reading line inside a folded stretch marks the folded card', async (t) => {
+  // Measured on a running host: the rail sat on turn 86 while that version's cards stopped
+  // at 75 and resumed at 88, because 76-87 were folded into one card. Matching the turn
+  // exactly found nothing, so the tree went unmarked — the other half of "the marker
+  // disappeared". The card that stands in for the turn is the one to point at.
+  const view = await mountView(t, { foldSharedAt: 2 }, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  const fold = view.foldCard();
+  assert.ok(fold, 'the fixture folds a shared stretch');
+  const id = fold.getAttribute('data-id');
+  const inside = Number(/#t(\d+)#fold$/.exec(id)[1]) + 1; // a turn the fold stands in for
+
+  assert.equal(doc.querySelector('.mtx-here'), null, 'nothing is marked to begin with');
+  fakeRail(doc, [inside], null);
+  const mark = [...doc.querySelectorAll('button[data-index]')].find((el) => el.getAttribute('aria-label') === '跳转到第 ' + inside + ' 轮');
+  assert.ok(mark, 'the rail has a mark for that turn');
+  await act(async () => {
+    mark.setAttribute('aria-current', 'true');
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  const marker = doc.querySelector('.mtx-here');
+  assert.ok(marker, 'the marker is drawn for a turn that only exists inside a fold: turn ' + inside);
+  assert.equal(marker.getAttribute('data-node'), id, 'and it points at that folded card');
+});
+test('a rail that arrives with its mark already set is read', async (t) => {
+  // The reported restart case: the host mounts the rail with its active mark already in
+  // place, which is a childList change and never an attribute change — so a watcher that
+  // only listens for aria-current sees nothing, no position is written down, and the tree
+  // has no marker until the reader scrolls (scrolling moves the mark, which the watcher
+  // does see).
+  const view = await mountView(t, {}, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  assert.equal(doc.defaultView.localStorage.getItem('dsh-tree-view:reading'), null, 'nothing is known yet');
+
+  fakeRail(doc, [4, 5, 6], 5); // the mark is set before the element is inserted
+  await new Promise((r) => setTimeout(r, 400));
+
+  const stored = JSON.parse(doc.defaultView.localStorage.getItem('dsh-tree-view:reading') || 'null');
+  assert.ok(stored, 'the position is read from a rail that never changed an attribute');
+  assert.equal(stored.turn, 5, 'and it is the active mark: ' + JSON.stringify(stored));
+});
+
+test('a conversation sitting at its bottom still has a position', async (t) => {
+  // The single-turn case: the rail can be silent at the very bottom, where the reader has
+  // not scrolled past anything. The last turn on screen is the position.
+  const view = await mountView(t, {}, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  for (const turn of [7, 8]) {
+    const row = doc.createElement('div');
+    row.className = 'mtx-row';
+    row.setAttribute('data-turn', String(turn));
+    row.setAttribute('data-session', 'session-root');
+    doc.body.appendChild(row);
+  }
+  await new Promise((r) => setTimeout(r, 400));
+
+  const stored = JSON.parse(doc.defaultView.localStorage.getItem('dsh-tree-view:reading') || 'null');
+  assert.ok(stored, 'the bottom of a conversation is a position too');
+  assert.equal(stored.turn, 8, 'the last turn on screen, not the one after it');
 });
