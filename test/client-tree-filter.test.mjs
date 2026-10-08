@@ -1374,3 +1374,64 @@ test('a conversation sitting at its bottom still has a position', async (t) => {
   assert.ok(stored, 'the bottom of a conversation is a position too');
   assert.equal(stored.turn, 8, 'the last turn on screen, not the one after it');
 });
+
+// A family is several conversations, and "where am I" is a question about one of
+// them. Reported: A was read to its second turn, a fork B was read on to its fifth,
+// and coming back to A left the triangle on B's fifth turn. The rail's last report
+// was B's — one position for the whole family cannot say which conversation the tree
+// is being shown for, and the marker followed B's turns into A's tree.
+const READ_BACK_VERSIONS = [
+  {
+    sessionId: 'session-a',
+    createdAt: 1,
+    current: true,
+    turns: [{ turn: 1, text: 'a one', time: 1 }, { turn: 2, text: 'a two', time: 2 }],
+  },
+  {
+    sessionId: 'session-b',
+    parentSessionId: 'session-a',
+    forkTurn: 2,
+    createdAt: 3,
+    turns: [1, 2, 3, 4, 5].map((turn) => ({ turn, text: 'b ' + turn, time: turn })),
+  },
+];
+
+test('switching back to a conversation marks that conversation own position', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true }, READ_BACK_VERSIONS, undefined, 'session-a', {}, 'legacy', {
+    // The app is showing A again after B: the conversation on screen, the rail's last
+    // report (B's fifth turn, which is what the single slot knew), and both positions
+    // kept per conversation.
+    'dsh.sessions.current': JSON.stringify({ sessionId: 'session-a' }),
+    'dsh-tree-view:reading': JSON.stringify({ sessionId: 'session-b', turn: 5 }),
+    'dsh-tree-view:reading-by-session': JSON.stringify({ v: 2, by: {
+      'session-a': { turn: 2, at: 1000 },
+      'session-b': { turn: 5, at: 2000 },
+    } }),
+  });
+  const doc = view.dom.window.document;
+  const ids = view.cardIds();
+  assert.ok(ids.includes('session-a#t2'), 'A last turn is on the canvas: ' + ids.join(', '));
+  assert.ok(ids.includes('session-b#t5'), 'and so is the fifth turn of the branch that was read last');
+
+  const marker = doc.querySelector('.mtx-here');
+  assert.ok(marker, 'the marker is drawn');
+  assert.equal(marker.getAttribute('data-node'), 'session-a#t2',
+    'the triangle sits on the conversation on screen, not on where the other branch was left');
+});
+
+test('a family opened without a position of its own still uses the newest one', async (t) => {
+  // The other half of the same rule: when the conversation on screen has never been
+  // read, the newest position in the family is still better than no marker at all.
+  const view = await mountView(t, { dropEmptyForks: true }, READ_BACK_VERSIONS, undefined, 'session-a', {}, 'legacy', {
+    'dsh.sessions.current': JSON.stringify({ sessionId: 'session-a' }),
+    'dsh-tree-view:reading': JSON.stringify({ sessionId: 'session-b', turn: 4 }),
+    'dsh-tree-view:reading-by-session': JSON.stringify({ v: 2, by: {
+      'session-b': { turn: 4, at: 2000 },
+    } }),
+  });
+  const doc = view.dom.window.document;
+  const marker = doc.querySelector('.mtx-here');
+  assert.ok(marker, 'the marker is drawn');
+  assert.equal(marker.getAttribute('data-node'), 'session-b#t4',
+    'A has no position of its own, so the family newest one stands in');
+});

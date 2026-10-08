@@ -1843,7 +1843,34 @@ function watchReading(sessions) {
   };
 }
 
-/** The node the reading position points at, or null when it is elsewhere. */
+/**
+ * The positions that could be "where the reader is", best first.
+ *
+ * A family holds several conversations, so "where am I" is a question about one of
+ * them: the conversation the tree is being shown for. The rail reports the turn of
+ * whatever conversation is open, and one slot cannot say which — reading B's turns and
+ * then switching back to A left the triangle on B's last turn (reported), because the
+ * last thing the rail ever said was B's. So the conversation on screen comes first, then
+ * what that conversation was last read at, then the newest position anywhere in the
+ * family — which is what coming back to a family from another conversation needs.
+ */
+function readingCandidates(nodes, openId) {
+  const list = [];
+  // The live slot leads when it is about the conversation on screen — and also when it
+  // names no conversation at all, which is an older host whose one position is the only
+  // one there is (and the one a jump of ours last wrote).
+  const live = !openId || reading.sessionId === null || reading.sessionId === openId;
+  if (live) list.push(reading);
+  if (openId) {
+    const own = recallReadingFor([openId]);
+    if (own) list.push(own);
+  }
+  const family = recallReadingFor(nodes.map(function (n) { return n.sessionId; }));
+  if (family) list.push(family);
+  if (!live) list.push(reading);
+  return list;
+}
+
 /**
  * The card that stands for a reading position.
  *
@@ -1854,17 +1881,18 @@ function watchReading(sessions) {
  * folded — so an exact match alone left the tree unmarked, which is the other half of
  * "the marker disappeared".
  *
- * So: what the rail last said, or the newest position read in any version of this family;
- * then the folded card that contains the turn; then the last card the reader has passed.
+ * So: the position that belongs to the conversation on screen (see readingCandidates),
+ * then the folded card that contains that turn, then the last card the reader has passed.
  */
-function readingNodeIn(nodes) {
-  const live = hereNodeFrom(nodes, reading);
-  if (live) return live;
-  const remembered = recallReadingFor(nodes.map(function (n) { return n.sessionId; }));
-  const wanted = remembered || reading;
-  if (wanted.turn === null) return null;
-  const exact = hereNodeFrom(nodes, wanted);
-  if (exact) return exact;
+function readingNodeIn(nodes, openId) {
+  const candidates = readingCandidates(nodes, openId);
+  let wanted = null;
+  for (let i = 0; i < candidates.length; i++) {
+    const exact = hereNodeFrom(nodes, candidates[i]);
+    if (exact) return exact;
+    if (!wanted && candidates[i].turn !== null) wanted = candidates[i];
+  }
+  if (!wanted) return null;
   const line = nodes.filter(function (n) {
     return wanted.sessionId === null ? n.current : n.sessionId === wanted.sessionId;
   });
@@ -3641,7 +3669,13 @@ return {
           // can be counter-scaled against the world. Rendered only when the reader's
           // turn is in this tree.
           (function () {
-            const node = readingNodeIn(turnNodes);
+            // Which conversation the marker is about is asked of the app rather than
+            // taken from the view's own prop: a family is several conversations, and a
+            // view can keep the id it mounted with after the app has switched (the same
+            // reason openVersion asks). `openSessionId` is also what the remembered
+            // positions are keyed by, so the lookup and the writing agree.
+            const openId = openSessionId(sessions) || sessionId;
+            const node = readingNodeIn(turnNodes, openId);
             if (!node) return null;
             const s = springs.current.get(node.id) || layout.pos.get(node.id);
             const h = cardHeights.current.get(node.id) || CARD_H;
