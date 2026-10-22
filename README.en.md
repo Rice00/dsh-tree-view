@@ -48,6 +48,12 @@ Switch the conversation panel to Tree and the whole family is drawn on one canva
 | 📦 **Archived branches stay** | A version you archive is still drawn, dimmed and marked "archived" — archiving takes an entry out of the sidebar, it does not delete a branch. |
 | 🎨 **Following the theme** | Surface, border, accent, state and even shadow colours come from the host's theme tokens: light follows light, dark follows dark. |
 
+## Optional: Tree in Better Sidebar
+
+Enable a compatible [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) version, then choose **Tree** from the right sidebar’s `+` menu. The original conversation Tree remains available, with or without Better Sidebar.
+
+On 2026-10-22, 17 targeted UI checks passed in isolated Chrome on macOS, including three archived-branch round trips; automated tests: 183 passed, 1 existing skip. Known issue: `settings.get` 405 can still occur after disabling Better Sidebar.
+
 ## Jump rules
 
 - **A turn inside the version you are reading**: the Chat tab opens, the conversation scrolls to that turn and it flashes — the session is not reloaded, and no archive flag changes.

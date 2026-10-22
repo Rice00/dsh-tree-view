@@ -12,6 +12,7 @@
 // upstream name on purpose — see the note in lib/index.js.
 const ROUTE = '/tree-view';
 const VIEW_ORDER = 16;
+const SIDEBAR_TAB_ID = 'dsh-tree-view:tree';
 
 function realGlobal() {
   try { if (typeof window !== 'undefined' && window) return window; } catch (e) {}
@@ -1984,6 +1985,11 @@ const CSS = [
   // edges. Cursor communicates state: grab on canvas, pointer on cards.
   '.mtx-graph{position:relative;height:100%;overflow:hidden;cursor:grab;background-image:radial-gradient(color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 22%,transparent) 1px,transparent 1px);background-size:26px 26px;touch-action:none;user-select:none}',
   '.mtx-graph[data-panning]{cursor:grabbing}',
+  '.mtx-sidebar-tree{position:relative;height:100%;min-height:0;min-width:0;overflow:hidden}',
+  '.mtx-sidebar-error{position:absolute;left:8px;right:8px;bottom:8px;z-index:5;padding:8px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#222);font-size:12px}',
+  '.mtx-sidebar-error button{float:right;cursor:pointer}',
+  '.mtx-graph[data-compact] .mtx-graph-tools{top:8px;right:8px;left:8px;justify-content:flex-end;flex-wrap:wrap;gap:4px}',
+  '.mtx-graph[data-compact] .mtx-tool{width:28px;height:28px}',
   '.mtx-world{position:absolute;left:0;top:0}',
   '.mtx-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}',
   // Branch names ride above the cards, and the marker above them.
@@ -2241,6 +2247,10 @@ return {
         branch: 'Branch',
         refresh: 'Refresh',
         fit: 'Center view',
+        sidebarUnavailable: 'Tree could not follow this session: the sidebar readiness service is unavailable. Open Tree from the sidebar + menu.',
+        sidebarFailed: 'Could not open Tree in the destination sidebar',
+        sidebarNavigationTimeout: 'The selected version did not open within 15 seconds. Please retry from Tree.',
+        sidebarTimeout: 'The destination sidebar did not become ready within 5 seconds. Open Tree from its + menu to retry.',
         empty: 'No versions yet — edit any of your messages to branch this conversation. Drag to pan, scroll to zoom.',
         images: '{count} image(s) kept as-is',
         nav: 'TreeView',
@@ -2312,6 +2322,10 @@ return {
         branch: '分支',
         refresh: '刷新',
         fit: '居中显示',
+        sidebarUnavailable: '侧栏就绪服务不可用，Tree 未能跟随此会话。请从侧栏 + 菜单打开。',
+        sidebarFailed: '无法在目标侧栏打开 Tree',
+        sidebarNavigationTimeout: '所选版本在 15 秒内未打开，请从 Tree 重试。',
+        sidebarTimeout: '目标侧栏在 5 秒内未就绪。请从它的 + 菜单重新打开 Tree。',
         empty: '还没有版本——编辑任意一条你的消息即可创建分支。拖动平移，滚轮缩放。',
         images: '{count} 张图片将原样保留',
         nav: 'TreeView',
@@ -2833,14 +2847,16 @@ return {
       const viewRef = React.useRef({ x: 60, y: 42, scale: 1 });
       // Written down when the view goes away — the host unmounts it on every tab switch —
       // so the position survives leaving the Tree and coming back.
-      const viewMemoryKeyRef = React.useRef(sessionId);
+      // A full page and a narrow sidebar have different coordinate spaces.
+      const viewMemoryKey = (props.compact ? 'sidebar:' : 'conversation:') + sessionId;
+      const viewMemoryKeyRef = React.useRef(viewMemoryKey);
       React.useEffect(function () {
-        viewMemoryKeyRef.current = sessionId;
+        viewMemoryKeyRef.current = viewMemoryKey;
         return function () {
           const view = viewRef.current;
           viewMemory.set(viewMemoryKeyRef.current, { x: view.x, y: view.y, scale: view.scale });
         };
-      }, [sessionId]);
+      }, [viewMemoryKey]);
       const dragRef = React.useRef(null);
       const rafRef = React.useRef(0);
       const fittedRef = React.useRef(false);
@@ -3305,7 +3321,7 @@ return {
           // Coming back to a conversation puts the reader where they left it (see
           // viewMemory); the first visit to a tree frames it, and the toolbar's ⌖ reframes
           // on demand.
-          const remembered = viewMemory.get(sessionId);
+          const remembered = viewMemory.get(viewMemoryKey);
           if (remembered) viewRef.current = { x: remembered.x, y: remembered.y, scale: remembered.scale };
           else fitView();
         } else if (fitAfterLayoutRef.current) {
@@ -3388,6 +3404,12 @@ return {
         if (!sessions) { remoteLog('info', 'click: no navigator'); return; }
         const v = versions.find(function (item) { return item.sessionId === node.sessionId; });
         if (!v) { remoteLog('info', 'click: ' + node.sessionId + ' is not in the payload'); return; }
+        // Only the optional sidebar supplies this adapter. The conversation
+        // Tree below deliberately retains its original navigation semantics.
+        if (props.onVersionSelect) {
+          props.onVersionSelect(v, node, versions, sessionId);
+          return;
+        }
         remoteLog('info', 'click: ' + node.sessionId + ' | prop-session=' + sessionId + ' | archived=' + v.archived);
         // "Is this the version already on screen" decides whether a click is just
         // "take me back to the Chat tab", and the slot's own sessionId is not
@@ -3657,6 +3679,7 @@ return {
 
       return React.createElement('div', {
         className: 'mtx-graph',
+        'data-compact': props.compact ? '' : undefined,
         ref: graphRef,
         onPointerDown: onPointerDown,
         onPointerMove: onPointerMove,
@@ -4083,6 +4106,276 @@ return {
         remoteLog('warn', 'Failed to register the user-message view; editing is unavailable.', e);
         return function () {};
       }
+    });
+
+    // Optional client-only integration. Do not make Better Sidebar a hard
+    // dependency: standalone Tree and message editing must still boot without it.
+    // Cordis re-enters this scope if the service is enabled/replaced later, and
+    // disposes the tab registration when either plugin goes away.
+    ctx.inject(['betterSidebar'], function (scope) {
+      const sidebar = scope.get('betterSidebar');
+      if (!sidebar || typeof sidebar.registerTab !== 'function') return;
+      let active = true;
+      let generation = 0;
+      let pending = null;
+      let cancelNavigation = function () {};
+      let handoffError = '';
+      const errorListeners = new Set();
+      const g = realGlobal();
+      function publishError(message) {
+        handoffError = message;
+        errorListeners.forEach(function (listener) { listener(); });
+        if (message) remoteLog('warn', message);
+      }
+      function cancelPending() {
+        if (!pending) return;
+        const request = pending;
+        pending = null;
+        if (request.frame) g.cancelAnimationFrame(request.frame);
+        clearTimeout(request.timer);
+        if (request.unsubscribe) request.unsubscribe();
+      }
+      // mounted means selected, NOT store-ready in DSH 0.2.1. React adopts
+      // the destination store later. commandTarget(null) is a feature-detected, read-only
+      // readiness probe: it returns no target until a surface really exists.
+      // Observe selection changes, then check readiness on rendering frames.
+      // The deadline only bounds failure; it is never a guessed mount delay.
+      function beginHandoff(sessionId, token) {
+        if (!active || token !== generation) return;
+        const controller = scope.get('sidebarRight');
+        const mounted = controller && controller.mounted;
+        if (!mounted || typeof mounted.getSnapshot !== 'function' || typeof mounted.subscribe !== 'function') {
+          publishError(t('sidebarUnavailable'));
+          return;
+        }
+        const request = { sessionId: sessionId, frame: 0, timer: 0, unsubscribe: null };
+        pending = request;
+        const selected = mounted.getSnapshot();
+        let reached = selected === sessionId;
+        function fail(message) { cancelPending(); cancelNavigation(); publishError(message); }
+        function check() {
+          request.frame = 0;
+          if (!active || token !== generation || pending !== request) return;
+          const current = mounted.getSnapshot();
+          if (current === sessionId) reached = true;
+          // Once selected, leaving that session (including a global panel)
+          // cancels the intent. Never queue a future surprise open in another
+          // session through Better Sidebar's own unbounded pending queue.
+          if ((reached && current !== sessionId) || (current !== selected && current !== sessionId)) {
+            cancelPending();
+            return;
+          }
+          if (current === sessionId) {
+            try {
+              const ready = typeof controller.commandTarget !== 'function'
+                || controller.commandTarget(null)?.sessionId === sessionId;
+              if (ready) {
+                sidebar.openTab({ type: SIDEBAR_TAB_ID, title: t('view'), target: 'right' }, { sessionId: sessionId });
+                cancelPending();
+                return;
+              }
+            } catch (error) {
+              // Older controllers may have no readiness probe. Only this
+              // known pre-adoption error is retryable; unrelated failures are
+              // visible and terminal, never swallowed or retried indefinitely.
+              if (!error || error.message !== 'sidebarRight: no session surface is mounted') {
+                fail(t('sidebarFailed') + ': ' + (error && error.message ? error.message : String(error)));
+                return;
+              }
+            }
+          }
+          request.frame = g.requestAnimationFrame(check);
+        }
+        request.timer = setTimeout(function () {
+          if (pending === request) fail(t('sidebarTimeout'));
+        }, 5000);
+        const unsubscribe = mounted.subscribe(function () {
+          if (pending !== request) return;
+          if (request.frame) g.cancelAnimationFrame(request.frame);
+          check();
+        });
+        request.unsubscribe = unsubscribe;
+        // Some observables eagerly notify subscribe(). That callback may have
+        // already completed/cancelled the request before we got its disposer.
+        if (pending !== request) { unsubscribe(); return; }
+        if (request.frame) g.cancelAnimationFrame(request.frame);
+        check();
+      }
+      // Reuse the unmodified upstream navigator through a scoped host-service
+      // proxy. Its restore, catalogue and 400ms reinforcement code stays intact;
+      // only calls belonging to a cancelled SIDEBAR intent are suppressed.
+      function selectVersion(version, node, versions, owner, origin) {
+        cancelNavigation();
+        cancelPending();
+        const token = ++generation;
+        origin.navigationGeneration = token;
+        publishError('');
+        const controller = scope.get('sidebarRight');
+        const mounted = controller && controller.mounted;
+        if (!mounted || typeof mounted.getSnapshot !== 'function' || typeof mounted.subscribe !== 'function') {
+          publishError(t('sidebarUnavailable'));
+          return;
+        }
+        const initial = mounted.getSnapshot();
+        if (initial === version.sessionId) {
+          showChat();
+          if (node.turn > 0) jumpToTurn(node.sessionId, node.turn);
+          return;
+        }
+        // Sidebar scopes/tree payloads can outlive a restore/collection. Use the
+        // native archive snapshot for this click, not an old graph's flags. Only
+        // the confirmed selected source gets the legacy-host fallback; never
+        // clear its running/deleted flags or bypass the common family checks.
+        const workspaces = scope.get('workspaces');
+        const workspaceList = workspaces && workspaces.list;
+        const workspaceSnapshot = workspaceList && typeof workspaceList.getSnapshot === 'function' && workspaceList.getSnapshot();
+        const archiveIds = workspaceSnapshot && (!workspaceSnapshot.phase || workspaceSnapshot.phase === 'ready') && workspaceSnapshot.archivedSessionIds;
+        const nativeArchives = Array.isArray(archiveIds) ? new Set(archiveIds) : null;
+        if (nativeArchives) version = Object.assign({}, version, { archived: nativeArchives.has(version.sessionId) });
+        const collectionVersions = versions.map(function (entry) {
+          return initial && entry.sessionId === initial
+            ? Object.assign({}, entry, { archived: nativeArchives ? nativeArchives.has(initial) : false })
+            : entry;
+        });
+        let cancelled = false;
+        let reached = false;
+        let arrived = false;
+        let frame = 0;
+        let timer;
+        const disposers = new Set();
+        const valid = function () { return active && !cancelled && token === generation; };
+        function own(dispose) {
+          if (!valid()) { dispose(); return function () {}; }
+          disposers.add(dispose);
+          return function () { disposers.delete(dispose); dispose(); };
+        }
+        function cancel() {
+          if (cancelled) return;
+          cancelled = true;
+          clearTimeout(timer);
+          if (frame) g.cancelAnimationFrame(frame);
+          disposers.forEach(function (dispose) { dispose(); });
+          disposers.clear();
+          if (token === generation) cancelPending();
+        }
+        cancelNavigation = cancel;
+        const adapter = sessionNavigator({ get: function (name) {
+          const service = scope.get(name);
+          if (!service) return service;
+          if (name === 'uiWorkspace') return {
+            openSession: typeof service.openSession !== 'function' ? undefined : function (id) {
+              if (valid()) return service.openSession(id);
+            },
+            unarchiveSession: typeof service.unarchiveSession !== 'function' ? undefined : async function (id) {
+              if (!valid()) return;
+              try { return await service.unarchiveSession(id); }
+              catch (error) { if (valid()) throw error; }
+            },
+          };
+          if (name === 'sessions') return {
+            list: service.list,
+            open: typeof service.open !== 'function' ? undefined : function (id) {
+              if (valid()) return service.open(id);
+            },
+          };
+          return service;
+        } });
+        const sourceList = adapter.list();
+        if (sourceList) adapter.list = function () { return {
+          getSnapshot: function () { return sourceList.getSnapshot(); },
+          subscribe: function (listener) {
+            if (!valid()) return function () {};
+            return own(sourceList.subscribe(function () { if (valid()) listener(); }));
+          },
+        }; };
+        function observe() {
+          if (!valid()) return;
+          const selected = mounted.getSnapshot();
+          if (selected === version.sessionId) reached = true;
+          else if (reached || selected !== initial) { cancel(); return; }
+          if (!reached || arrived || frame) return;
+          // mounted is published inside host selection.set(), before the host
+          // replaces its main reference. Defer to a render frame before any
+          // source collection or view work, rather than re-entering that write.
+          frame = g.requestAnimationFrame(function () {
+            frame = 0;
+            if (!valid() || mounted.getSnapshot() !== version.sessionId) return;
+            arrived = true;
+            showChat();
+            if (version.archived === true) collectLeftVersion(adapter, initial || owner, version.sessionId, collectionVersions);
+            beginHandoff(version.sessionId, token);
+            if (node.turn > 0) jumpToTurn(node.sessionId, node.turn);
+          });
+        }
+        own(mounted.subscribe(observe));
+        timer = setTimeout(function () {
+          if (valid() && !arrived) publishError(t('sidebarNavigationTimeout'));
+          cancel();
+        }, 15000);
+        openVersionTarget(adapter, version).catch(function (error) {
+          if (valid()) publishError(t('sidebarFailed') + ': ' + (error && error.message ? error.message : String(error)));
+          cancel();
+        });
+        observe();
+      }
+      scope.effect(function () { return function () {
+        active = false;
+        generation++;
+        cancelNavigation();
+        cancelPending();
+        errorListeners.clear();
+      }; });
+      function SidebarTree(props) {
+        const instance = React.useRef({});
+        const [, redraw] = React.useReducer(function (x) { return x + 1; }, 0);
+        React.useEffect(function () {
+          errorListeners.add(redraw);
+          return function () { errorListeners.delete(redraw); };
+        }, []);
+        const owner = props.scope && props.scope.sessionId;
+        React.useEffect(function () {
+          const lifecycleGeneration = props.visible ? generation : null;
+          function cancelIfOwnerStillSelected() {
+            // A source canvas unmount during a successful cross-session switch
+            // is expected. A retained target's OLD effect can also clean up as
+            // that session returns: it must not cancel another instance's click.
+            // The source owns the generation it started; a newly mounted/shown
+            // destination owns only the generation of this effect lifecycle.
+            const controller = scope.get('sidebarRight');
+            const current = controller && controller.mounted && controller.mounted.getSnapshot();
+            if (current === owner && (instance.current.navigationGeneration === generation || lifecycleGeneration === generation)) {
+              generation++; cancelNavigation(); cancelPending();
+            }
+          }
+          if (!props.visible) cancelIfOwnerStillSelected();
+          return cancelIfOwnerStillSelected;
+        }, [owner, props.visible]);
+        // Unmount the canvas while hidden: its existing effect cleanup releases
+        // animation frames, observers and listeners. The shared treeStore keeps
+        // the data warm without a second cache or background polling loop.
+        if (!props.visible || !owner) return null;
+        return React.createElement('div', { className: 'mtx-sidebar-tree' },
+          handoffError ? React.createElement('div', { className: 'mtx-sidebar-error', role: 'alert' },
+            handoffError, React.createElement('button', { type: 'button', onClick: function () { publishError(''); } }, '×')) : null,
+          React.createElement(VersionsView, {
+            key: owner,
+            sessionId: owner,
+            compact: true,
+            onVersionSelect: function (version, node, versions, owner) {
+              selectVersion(version, node, versions, owner, instance.current);
+            },
+          })
+        );
+      }
+      scope.effect(function () {
+        return sidebar.registerTab({
+          id: SIDEBAR_TAB_ID,
+          title: function () { return t('view'); },
+          order: VIEW_ORDER,
+          single: true,
+          component: SidebarTree,
+        });
+      });
     });
 
     slots.inject('conversation.view', function () {
