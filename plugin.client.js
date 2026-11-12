@@ -918,16 +918,37 @@ const viewMemory = new Map();
 
 /* ---------------------------------------------------------------- utils -- */
 
-function contentText(content) {
-  if (!Array.isArray(content)) return '';
-  let out = '';
-  for (let i = 0; i < content.length; i++) {
-    const block = content[i];
-    if (block && block.type === 'text' && typeof block.text === 'string') {
-      out += (out ? '\n' : '') + block.text;
+/**
+ * Split a user message into the shape the host's user-content renderer takes.
+ *
+ * This mirrors the host's own `contentParts` on purpose: the message body is
+ * only half of what a user message carries, and the part that turns `@file`
+ * and session references into clickable chips lives downstream of the host
+ * renderer, not in the text. Anything this function cannot account for is
+ * handed back as an extra block instead of being dropped.
+ */
+function contentParts(content) {
+  const texts = [];
+  const attachments = [];
+  const rest = [];
+  if (Array.isArray(content)) {
+    for (let i = 0; i < content.length; i++) {
+      const block = content[i];
+      if (!block || typeof block !== 'object') { rest.push(block); continue; }
+      if (block.type === 'text' && typeof block.text === 'string') {
+        texts.push(block.text);
+      } else if (block.type === 'image' && block.attachment !== undefined) {
+        attachments.push({ type: 'image', image: { attachment: block.attachment } });
+      } else if (block.type === 'file' && block.attachment !== undefined) {
+        attachments.push({ type: 'file', file: block.attachment });
+      } else {
+        rest.push(block);
+      }
     }
   }
-  return out;
+  // Text blocks concatenate, they do not gain a separator: that is what the
+  // host does, and the chat is not ours to re-punctuate.
+  return { text: texts.join(''), attachments, rest };
 }
 
 function firstTextBlockIndex(content) {
@@ -955,6 +976,56 @@ function imageParts(content) {
     if (block && block.type === 'image' && block.attachment) out.push({ attachment: block.attachment });
   }
   return out;
+}
+
+/**
+ * Draw a user message through the host's own user-content factory.
+ *
+ * This view replaces the host row, so it inherits the host row's duties. The
+ * text is the smallest of them: `@file` and session references only become
+ * chips, and only become clickable, inside the host renderer — it parses the
+ * text against its reference rules and wires each chip to its own open action.
+ * A renderer that draws the joined string instead shows the same characters
+ * with none of that, which reads as "the style broke".
+ *
+ * Returns null when this host has no such factory (older hosts), so the caller
+ * can keep the plain bubble rather than fail to render the message at all.
+ *
+ * @param props - the Chat node renderer's props, which carry the factory seat.
+ * @param parts - message content split by `contentParts`.
+ * @param referenceLabels - exact session mention labels, when the step recorded them.
+ * @param skillNames - skills the step's injections loaded, when they were recorded.
+ * @returns the host-rendered content, or null.
+ */
+let hostContentWarned = false;
+
+function renderHostContent(props, parts, referenceLabels, skillNames) {
+  if (typeof props.renderFactorySlot !== 'function') return null;
+  const content = { text: parts.text, attachments: parts.attachments, extraBlocks: parts.rest };
+  if (referenceLabels !== undefined) content.referenceLabels = referenceLabels;
+  // `facts` is what the reference rules read; `content.referenceLabels` is the
+  // summary line under the bubble. The host supplies both from the same data,
+  // so both are supplied here.
+  const facts = {};
+  if (referenceLabels !== undefined) facts.sessionLabels = referenceLabels;
+  if (skillNames !== undefined) facts.skillNames = skillNames;
+  try {
+    return props.renderFactorySlot('conversation.chat.user.content', {
+      content,
+      loadImage: props.loadImage,
+      facts,
+      // Interactive: the references are meant to be clicked.
+      interactive: true,
+    });
+  } catch (e) {
+    // Warn once, not on every render: a host without the factory is a static
+    // fact about that host, not a per-message event.
+    if (!hostContentWarned) {
+      hostContentWarned = true;
+      remoteLog('warn', 'No user-content factory on this host; user messages render as plain text.', e);
+    }
+    return null;
+  }
 }
 
 function clip(text, max) {
@@ -1960,6 +2031,10 @@ const CSS = [
   '.mtx-row:hover .mtx-edit-btn{opacity:1}',
   '.mtx-edit-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
   '.mtx-bubble{background:var(--dsw-alias-interactive-bg-hover,rgba(140,140,150,.14));border-radius:16px;padding:10px 16px;font-size:15px;line-height:26px;color:var(--dsw-alias-label-primary);white-space:pre-wrap;overflow-wrap:anywhere}',
+  // The host's own bubble when it drew the message: no frame of ours, just the
+  // box the row gives it. Same column the host's user row uses, so attachments
+  // and the reference summary stack the way they do outside this plugin.
+  '.mtx-content{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:100%}',
   '.mtx-img{font-size:12px;color:var(--dsw-alias-label-tertiary);margin-top:4px}',
 
   // Inline editor, ChatGPT-style: the bubble grows into an editing surface
@@ -2091,7 +2166,7 @@ const CSS = [
 
   // Flash highlight when a graph click lands on its message.
   '@keyframes mtx-flash-kf{0%,55%{background:color-mix(in srgb,var(--mtx-accent) 22%,transparent)}100%{background:transparent}}',
-  '.mtx-flash .mtx-bubble{animation:mtx-flash-kf 1.4s ease-out}',
+  '.mtx-flash .mtx-bubble,.mtx-flash .mtx-content [data-message-bubble]{animation:mtx-flash-kf 1.4s ease-out}',
 
   /* ---- action row, below the bubble ------------------------------------ */
   // All three references put the message controls BELOW the bubble, not
@@ -2504,9 +2579,21 @@ return {
     function UserMessageView(props) {
       const node = props.node;
       const data = node.data || {};
-      const text = contentText(data.content);
+      const parts = contentParts(data.content);
+      const text = parts.text;
       const images = imageCount(data.content);
       const messageImages = imageParts(data.content);
+      // Reference labels and loaded skill names are facts about the message, not
+      // text: the host's chip renderer reads them out of `facts`. Refusing to
+      // pass them on is how session references and `/skill` chips went missing.
+      const referenceLabels = Array.isArray(data.referenceLabels) ? data.referenceLabels : undefined;
+      const skillNames = Array.isArray(data.skillNames) ? data.skillNames : undefined;
+      // What the host's own user-content renderer would draw, when this host has
+      // one. Everything a message can visually carry — the text with its `@` and
+      // `/` references, attachments in order, the reference summary line — is
+      // owned there; drawing the joined text alone skipped that renderer
+      // entirely, which is why references arrived as plain unclickable text.
+      const hostContent = renderHostContent(props, parts, referenceLabels, skillNames);
       const sessionId = props.sessionId !== undefined ? props.sessionId : (node.sessionId);
       // location.turn is a turn-group object ({turn, start, end, steps}); the
       // turn number lives one level down.
@@ -2733,9 +2820,13 @@ return {
         );
       }
 
-      return React.createElement('div', { className: 'mtx-row', 'data-turn': turn, 'data-session': sessionId },
-        React.createElement('div', { className: 'mtx-line' },
-          React.createElement('div', { className: 'mtx-bubble' },
+      // The host draws the message whenever it can: its own bubble, its reference
+      // chips with their click actions, its attachment cards and gallery. The
+      // plain bubble is the fallback for a host that has no user-content factory,
+      // and it is the only branch that has to guess at attachments.
+      const body = hostContent !== null
+        ? React.createElement('div', { className: 'mtx-content' }, hostContent)
+        : React.createElement('div', { className: 'mtx-bubble' },
             text,
             // The host renders attachments through its images slot (native
             // gallery plus lightbox); keep the placeholder only when the slot
@@ -2743,8 +2834,10 @@ return {
             messageImages.length > 0 && typeof props.renderMessageImages === 'function'
               ? props.renderMessageImages({ images: messageImages, align: 'end' })
               : (images > 0 ? React.createElement('div', { className: 'mtx-img' }, t('images', { count: images })) : null)
-          )
-        ),
+          );
+
+      return React.createElement('div', { className: 'mtx-row', 'data-turn': turn, 'data-session': sessionId },
+        React.createElement('div', { className: 'mtx-line' }, body),
         // The controls sit under the bubble in all three references. Which
         // ones exist, and whether they wait for hover, is what differs.
         React.createElement('div', { className: 'mtx-actions' },
