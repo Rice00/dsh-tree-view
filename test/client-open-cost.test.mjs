@@ -57,7 +57,7 @@ test('the world layer is raised by a gesture, not by the opening fit', () => {
     'the scale comparison that drives the refresh is unchanged');
   assert.match(apply, /el\.style\.transform = /, 'the transform is written whether or not the layer is up');
   assert.ok(bundle.includes('function promoteWorld()'), 'the gesture path can raise the layer itself');
-  const pan = between('function onPointerMove(', 'function onPointerUp()');
+  const pan = between('function onPointerMove(', 'function onPointerUp(ev)');
   assert.match(pan, /promoteWorld\(\);/,
     'a pan that leaves the threshold promotes the world, so the gesture is a transform and not a repaint per frame');
   const wheel = between("const onWheel = function (ev) {", 'el.addEventListener');
