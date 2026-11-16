@@ -20,7 +20,7 @@ dsh-tree-view/
 │   ├── build-client.mjs   # Build script wrapping plugin.client.js into lib/client.js
 │   ├── check-package.mjs  # Packs the plugin and verifies the tarball
 │   └── …                  # QA fixture and the DSH acceptance runners
-├── test/                  # 17 behaviour-level test files (node:test)
+├── test/                  # 19 behaviour-level test files (node:test)
 ├── .github/
 │   ├── workflows/ci.yml   # Regression suite, package check, official-host acceptance
 │   └── release-notes/     # One file per release; upstream's are named upstream-*
