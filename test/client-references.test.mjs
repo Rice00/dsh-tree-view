@@ -204,6 +204,23 @@ test('a factory that refuses the slot leaves the message readable instead of bre
   assert.ok(doc.querySelector('.mtx-act[data-act=edit]'));
 });
 
+test('a factory that returns nothing falls back to the plain bubble', async t => {
+  // A host answers "no such slot" either by throwing or by returning an empty
+  // value; the second shape used to be read as "the host drew it", which left
+  // an empty content box and made the message look deleted. Each shape gets its
+  // own subtest: one mount swaps the browser globals for the duration of a case.
+  for (const [label, empty] of [['undefined', undefined], ['null', null]]) {
+    await t.test(label, async t => {
+      const { doc } = await mount(t, { content: [text('nothing to draw')] }, {
+        renderFactorySlot: () => empty,
+      });
+      assert.equal(doc.querySelector('.mtx-content'), null, 'An empty answer must not take the host path');
+      assert.equal(doc.querySelector('.mtx-bubble')?.textContent, 'nothing to draw');
+      assert.ok(doc.querySelector('.mtx-act[data-act=edit]'), 'The row stays usable');
+    });
+  }
+});
+
 test('the host path gets a full-width, definite box instead of a shrink-to-fit one', async t => {
   const calls = [];
   const { doc } = await mount(t, { content: [text('继续')] }, { renderFactorySlot: hostFactory(calls) });

@@ -1009,8 +1009,9 @@ function renderHostContent(props, parts, referenceLabels, skillNames) {
   const facts = {};
   if (referenceLabels !== undefined) facts.sessionLabels = referenceLabels;
   if (skillNames !== undefined) facts.skillNames = skillNames;
+  let out;
   try {
-    return props.renderFactorySlot('conversation.chat.user.content', {
+    out = props.renderFactorySlot('conversation.chat.user.content', {
       content,
       loadImage: props.loadImage,
       facts,
@@ -1026,6 +1027,19 @@ function renderHostContent(props, parts, referenceLabels, skillNames) {
     }
     return null;
   }
+  // A host can also answer "no" without throwing: an unregistered slot key
+  // comes back as `undefined` rather than an exception on some builds. The
+  // caller decides between the host path and the plain bubble with a null
+  // check, so an empty return has to arrive as null — otherwise the row
+  // renders an empty content box and the message looks deleted.
+  if (out === undefined || out === null) {
+    if (!hostContentWarned) {
+      hostContentWarned = true;
+      remoteLog('warn', 'The user-content factory returned nothing; user messages render as plain text.');
+    }
+    return null;
+  }
+  return out;
 }
 
 function clip(text, max) {
