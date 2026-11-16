@@ -132,9 +132,11 @@ Please install the DSH plugin dsh-tree-view:
 | `0.1.5-rc.2` | Verified — end-to-end acceptance: edit, retry, reading branches back after a restart, nested markers and image retention |
 | `0.1.7-rc.1` | Verified — the same host-side acceptance; the client speaks both generations of the session-navigation API |
 | `0.2.0-rc.1` | Verified — the same host-side acceptance; session navigation is still the 0.1.7 generation, and archiving goes through the workspace registry |
+| `0.2.1-rc.2` | Verified — the same host-side acceptance; this is also the runtime the plugin's own workstation runs |
+| `0.2.2-rc.1` | Verified — the same host-side acceptance, run on Node 24 because this host line declares `engines.node >=24.9` |
 | `0.1.5-rc.3`, other `0.1.x` and `0.2.x` | Inside the same `engines` range, not verified on its own |
 
-When the host moves to a new line, run the acceptance in CI's host matrix first, then change the range — that matrix lists exactly the three verified versions above.
+When the host moves to a new line, run the acceptance in CI's host matrix first, then change the range — that matrix lists exactly the five verified versions above.
 
 **The client stops for one thing only**: `slots` (without it there is nothing to register into). Everything else is taken on a "use it if it is there" basis: both generations of session navigation are understood (0.1.7's `uiWorkspace.openSession` and the older `sessions.open`), the session list and the locale pack come in through optional injection, and the subagent catalogue is read from either generation's field. A host that renames or drops one of those loses that one ability; it does not make the plugin install itself invisibly.
 
