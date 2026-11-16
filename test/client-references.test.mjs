@@ -203,3 +203,25 @@ test('a factory that refuses the slot leaves the message readable instead of bre
   // The controls still work, so the row is usable rather than half-dead.
   assert.ok(doc.querySelector('.mtx-act[data-act=edit]'));
 });
+
+test('the host path gets a full-width, definite box instead of a shrink-to-fit one', async t => {
+  const calls = [];
+  const { doc } = await mount(t, { content: [text('继续')] }, { renderFactorySlot: hostFactory(calls) });
+  // The host caps its bubble with `max-width: min(525px, 82%)`. A percentage
+  // inside a shrink-to-fit box resolves against the message's own text width,
+  // so the bubble becomes 82% of the words it holds and CJK breaks per
+  // character. The line therefore has to span the row, and the content inside
+  // it has to be sized against that line rather than against the text.
+  const line = doc.querySelector('.mtx-line');
+  assert.ok(line?.classList.contains('mtx-line-host'), 'The host path must span the row');
+  assert.equal(line?.querySelector(':scope > .mtx-content')?.className, 'mtx-content');
+  // Both halves of the contract live in the stylesheet the bundle ships.
+  assert.ok(bundle.includes('.mtx-line-host{width:100%;max-width:100%;justify-content:flex-end}'));
+  assert.match(bundle, /\.mtx-content\{[^}]*width:100%/);
+});
+
+test('the plain-text fallback keeps its shrink-to-fit bubble', async t => {
+  const { doc } = await mount(t, { content: [text('继续')] });
+  assert.ok(doc.querySelector('.mtx-line'));
+  assert.equal(doc.querySelector('.mtx-line-host'), null, 'A bubble of ours does not need the host box');
+});

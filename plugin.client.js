@@ -2034,7 +2034,14 @@ const CSS = [
   // The host's own bubble when it drew the message: no frame of ours, just the
   // box the row gives it. Same column the host's user row uses, so attachments
   // and the reference summary stack the way they do outside this plugin.
-  '.mtx-content{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:100%}',
+  // The host draws its own max-width caps as percentages of the column it is
+  // given. A shrink-to-fit box makes those percentages cyclic: they resolve
+  // against the message's own text width, so the bubble tops out at 82% of the
+  // words it is trying to hold and every CJK line breaks early. The host path
+  // therefore gets a full-width, definite box and lets the host's own cap do
+  // the limiting — same numbers as the native row.
+  '.mtx-line-host{width:100%;max-width:100%;justify-content:flex-end}',
+  '.mtx-content{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:100%;width:100%}',
   '.mtx-img{font-size:12px;color:var(--dsw-alias-label-tertiary);margin-top:4px}',
 
   // Inline editor, ChatGPT-style: the bubble grows into an editing surface
@@ -2837,7 +2844,7 @@ return {
           );
 
       return React.createElement('div', { className: 'mtx-row', 'data-turn': turn, 'data-session': sessionId },
-        React.createElement('div', { className: 'mtx-line' }, body),
+        React.createElement('div', { className: hostContent !== null ? 'mtx-line mtx-line-host' : 'mtx-line' }, body),
         // The controls sit under the bubble in all three references. Which
         // ones exist, and whether they wait for hover, is what differs.
         React.createElement('div', { className: 'mtx-actions' },
