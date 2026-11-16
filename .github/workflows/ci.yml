@@ -54,12 +54,17 @@ jobs:
         # tree's collect and unarchive go through.
         # 0.2.1-rc.2 is the runtime this plugin's own workstation runs, so a
         # release is checked against it here rather than after a user reports it.
-        dsh: ['0.1.5-rc.2', '0.1.7-rc.1', '0.2.0-rc.1', '0.2.1-rc.2']
+        # 0.2.2-rc.1 is the line a touchscreen bug was reported against; it also
+        # declares `engines.node >=24.9`, which is why the node version below is
+        # picked per line instead of pinned to one value.
+        dsh: ['0.1.5-rc.2', '0.1.7-rc.1', '0.2.0-rc.1', '0.2.1-rc.2', '0.2.2-rc.1']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          # 0.2.2-rc.1 refuses to run below Node 24.9; every earlier line is kept
+          # on 22 so a regression that only shows on the older runtime is caught.
+          node-version: ${{ matrix.dsh == '0.2.2-rc.1' && 24 || 22 }}
           cache: npm
       - run: npm ci
       - run: npm run build
