@@ -20,7 +20,7 @@ dsh-tree-view/
 │   ├── build-client.mjs   # Build script wrapping plugin.client.js into lib/client.js
 │   ├── check-package.mjs  # Packs the plugin and verifies the tarball
 │   └── …                  # QA fixture and the DSH acceptance runners
-├── test/                  # 16 behaviour-level test files (node:test)
+├── test/                  # 17 behaviour-level test files (node:test)
 ├── .github/
 │   ├── workflows/ci.yml   # Regression suite, package check, official-host acceptance
 │   └── release-notes/     # One file per release; upstream's are named upstream-*
@@ -64,8 +64,10 @@ fresh checkout before running tests (Node 22.19+ or Node 24).
   active-path and ring-index behaviour (custom runner; prints `all passed`).
 - `test/client-*.test.mjs`: the client half through its module loader — tree
   filtering and folding, the re-frame after a fold, subagent marks, host theme
-  tokens, image delegation, settings, and that a zoomed canvas is not left
-  behind as a stretched GPU layer.
+  tokens, image delegation, the message body handed to the host's user-content
+  factory (text, attachments, reference labels, skill names, and the fallback
+  for a host that has no such factory), settings, and that a zoomed canvas is
+  not left behind as a stretched GPU layer.
 - `test/session-record.test.mjs`, `test/host-compatibility.test.mjs` and
   `test/tree-payload.test.mjs`: legacy and current session shapes, live and
   resumed edit requests, retained images, retry ancestry, nested version
