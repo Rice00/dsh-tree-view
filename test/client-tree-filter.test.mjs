@@ -1500,3 +1500,100 @@ test('a family opened without a position of its own still uses the newest one', 
   assert.equal(marker.getAttribute('data-node'), 'session-b#t4',
     'A has no position of its own, so the family newest one stands in');
 });
+
+test('two thumbs pinch the canvas instead of fighting over the pan', async (t) => {
+  // Reported on a touchscreen: single-finger panning was fine, but pinching made
+  // the tree flicker between two positions. The cause is structural — one drag
+  // record, so the second finger re-anchored it and every move wrote the
+  // transform from a different origin. Two fingers now zoom around their
+  // midpoint, and the pan they interrupted is dropped.
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  const graph = doc.querySelector('.mtx-graph');
+  assert.ok(graph, 'the canvas is drawn');
+  const scaleOf = (transform) => {
+    const m = /scale\(([-\d.eE]+)\)/.exec(transform || '');
+    return m ? Number(m[1]) : null;
+  };
+  const at = (id, x, y) => {
+    const ev = new doc.defaultView.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    Object.defineProperty(ev, 'pointerId', { value: id });
+    return ev;
+  };
+  const move = (id, x, y) => {
+    const ev = new doc.defaultView.MouseEvent('pointermove', { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    Object.defineProperty(ev, 'pointerId', { value: id });
+    return ev;
+  };
+  const up = (id, x, y) => {
+    const ev = new doc.defaultView.MouseEvent('pointerup', { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    Object.defineProperty(ev, 'pointerId', { value: id });
+    return ev;
+  };
+  const before = scaleOf(view.worldTransform());
+  await act(async () => {
+    graph.dispatchEvent(at(1, 100, 100));
+    graph.dispatchEvent(at(2, 200, 100));
+    // Fingers move apart: 100px apart becomes 140px apart.
+    graph.dispatchEvent(move(1, 80, 100));
+    graph.dispatchEvent(move(2, 220, 100));
+  });
+  const after = scaleOf(view.worldTransform());
+  assert.ok(before && after, 'the transform carries a scale');
+  assert.ok(after > before * 1.1, 'pinching out zooms in: ' + before + ' -> ' + after);
+});
+
+test('lifting one of two fingers does not jump the canvas', async (t) => {
+  // The other half of the same report: the view has to stay put when a thumb
+  // leaves, and the finger that remains continues as a pan from where it is.
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  const graph = doc.querySelector('.mtx-graph');
+  const at = (type, id, x, y) => {
+    const ev = new doc.defaultView.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    Object.defineProperty(ev, 'pointerId', { value: id });
+    return ev;
+  };
+  await act(async () => {
+    graph.dispatchEvent(at('pointerdown', 1, 100, 100));
+    graph.dispatchEvent(at('pointerdown', 2, 200, 100));
+    graph.dispatchEvent(at('pointermove', 1, 90, 100));
+    graph.dispatchEvent(at('pointermove', 2, 210, 100));
+  });
+  const during = view.worldTransform();
+  await act(async () => { graph.dispatchEvent(at('pointerup', 2, 210, 100)); });
+  const afterLift = view.worldTransform();
+  assert.equal(afterLift, during, 'the transform is unchanged by the finger leaving');
+  await act(async () => {
+    graph.dispatchEvent(at('pointermove', 1, 120, 130));
+    graph.dispatchEvent(at('pointerup', 1, 120, 130));
+  });
+  const afterPan = view.worldTransform();
+  assert.ok(afterPan !== afterLift, 'the remaining finger still pans: ' + afterLift + ' -> ' + afterPan);
+});
+
+test('a pinch is not a click on the card under it', async (t) => {
+  const posts = [];
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, VERSIONS, async (url, options) => {
+    if (options && options.method === 'POST') { posts.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ ok: true }) }; }
+    return { ok: true, json: async () => ({ versions: VERSIONS }) };
+  }, 'session-root');
+  const doc = view.dom.window.document;
+  const graph = doc.querySelector('.mtx-graph');
+  const card = doc.querySelector('.mtx-card[data-id="session-root#t1"]');
+  assert.ok(card, 'the card is drawn');
+  const at = (type, id, x, y) => {
+    const ev = new doc.defaultView.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    Object.defineProperty(ev, 'pointerId', { value: id });
+    return ev;
+  };
+  await act(async () => {
+    card.dispatchEvent(at('pointerdown', 1, 200, 200));
+    card.dispatchEvent(at('pointerdown', 2, 260, 200));
+    card.dispatchEvent(at('pointermove', 2, 290, 200));
+    card.dispatchEvent(at('pointerup', 2, 290, 200));
+    card.dispatchEvent(at('pointerup', 1, 200, 200));
+  });
+  assert.equal(posts.filter((p) => p.action === 'activate').length, 0,
+    'a pinch over a card does not open it');
+});

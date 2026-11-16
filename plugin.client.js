@@ -3002,6 +3002,12 @@ return {
         };
       }, [sessionId]);
       const dragRef = React.useRef(null);
+      // Two thumbs on a touchscreen are a pinch, not two pans. The drag record is
+      // single, so before this the second `pointerdown` re-anchored it at the new
+      // finger and every move wrote the transform from that origin — the canvas
+      // appeared to jump between two places. Tracking every live pointer lets the
+      // second one start a pinch and lets the first one be resumed afterwards.
+      const pinchRef = React.useRef({ pointers: new Map(), lastDist: null, pinched: false });
       const rafRef = React.useRef(0);
       const fittedRef = React.useRef(false);
       // While the canvas is moving the world is one GPU layer (smooth pan/zoom);
@@ -3532,6 +3538,10 @@ return {
         if (!el) return undefined;
         const onWheel = function (ev) {
           ev.preventDefault();
+          // Two fingers already own the gesture: a wheel (synthesised or from a
+          // trackpad on the same machine) would add a second scale on top of the
+          // pinch and put the two sources back in the fight this fix removes.
+          if (pinchRef.current.pointers.size >= 2) return;
           promoteWorld();
           const view = viewRef.current;
           const rect = el.getBoundingClientRect();
@@ -3758,6 +3768,42 @@ return {
         positionGroupNames();
       });
 
+      function pinchState() {
+        const p = pinchRef.current;
+        const pts = Array.from(p.pointers.values());
+        if (pts.length < 2) return null;
+        const a = pts[0], b = pts[1];
+        return {
+          dist: Math.hypot(a.x - b.x, a.y - b.y),
+          mx: (a.x + b.x) / 2,
+          my: (a.y + b.y) / 2,
+        };
+      }
+
+      // One finger, two fingers, then one again: the canvas keeps the scale the
+      // pinch set, and the finger still down continues panning from where it is.
+      // Nothing is re-anchored to a stale origin, so the view never jumps.
+      function applyPinch() {
+        const now = pinchState();
+        const p = pinchRef.current;
+        if (now === null) { p.lastDist = null; return; }
+        const el = graphRef.current;
+        if (!el) return;
+        if (p.lastDist !== null && p.lastDist > 0) {
+          const rect = el.getBoundingClientRect();
+          const mx = now.mx - rect.left;
+          const my = now.my - rect.top;
+          const view = viewRef.current;
+          const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.scale * (now.dist / p.lastDist)));
+          const f = next / view.scale;
+          view.x = mx - (mx - view.x) * f;
+          view.y = my - (my - view.y) * f;
+          view.scale = next;
+          applyView();
+        }
+        p.lastDist = now.dist;
+      }
+
       function onPointerDown(ev) {
         if (ev.button !== 0) return;
         const cardEl = ev.target.closest ? ev.target.closest('.mtx-card') : null;
@@ -3767,6 +3813,19 @@ return {
         // at all and Cancel looked dead. Overlays belong on this list.
         if (ev.target.closest && ev.target.closest('.mtx-tool,.mtx-link,.mtx-rename,.mtx-menu,.mtx-confirm')) return;
         const view = viewRef.current;
+        const pinch = pinchRef.current;
+        pinch.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+        try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch (e) {}
+        if (pinch.pointers.size >= 2) {
+          // The second finger turns the gesture into a pinch: the pan it was
+          // standing on is dropped, so the two origins never both write.
+          dragRef.current = null;
+          pinch.pinched = true;
+          pinch.lastDist = pinchState() ? pinchState().dist : null;
+          if (graphRef.current) graphRef.current.removeAttribute('data-panning');
+          promoteWorld();
+          return;
+        }
         // A press on empty canvas pans right away. A press on a card is ambiguous
         // — it is both "open this version" and "grab the canvas here" — so the
         // decision waits for the first movement: under the threshold the release
@@ -3782,10 +3841,14 @@ return {
           ox: view.x, oy: view.y,
         };
         if (!cardEl) graphRef.current.setAttribute('data-panning', '');
-        try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch (e) {}
       }
 
       function onPointerMove(ev) {
+        const pinch = pinchRef.current;
+        if (pinch.pointers.has(ev.pointerId)) {
+          pinch.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+        }
+        if (pinch.pointers.size >= 2) { applyPinch(); return; }
         const d = dragRef.current;
         if (!d) return;
         const dx = ev.clientX - d.sx;
@@ -3804,10 +3867,26 @@ return {
         applyView();
       }
 
-      function onPointerUp() {
+      function onPointerUp(ev) {
+        const pinch = pinchRef.current;
+        // Deleting by `ev.pointerId` even when the event carries none keeps the
+        // map from growing a stale entry per gesture (a synthetic or legacy event
+        // without the field is keyed by `undefined` here and on the way in).
+        if (ev) pinch.pointers.delete(ev.pointerId);
+        if (pinch.pointers.size >= 2) { applyPinch(); return; }
+        pinch.lastDist = null;
         const d = dragRef.current;
         dragRef.current = null;
         if (graphRef.current) graphRef.current.removeAttribute('data-panning');
+        // One thumb is still down: it takes over as a pan from where it is, and
+        // the release that follows is not a click on whatever is under it.
+        if (pinch.pointers.size === 1) {
+          const only = Array.from(pinch.pointers.values())[0];
+          const view = viewRef.current;
+          dragRef.current = { kind: 'pan', id: null, moved: true, sx: only.x, sy: only.y, ox: view.x, oy: view.y };
+          return;
+        }
+        if (pinch.pinched) { pinch.pinched = false; return; }
         if (!d) return;
         // A press that never moved is a click, and a click on a card opens it.
         if (!d.moved && d.id) openVersion(d.id);
