@@ -289,6 +289,27 @@ check('turn 2 of A hangs off A#t1', tree2.find((n) => n.id === 'A#t2')?.parentId
 // Scenario 3: Empty versions
 check('empty versions produces empty tree', buildTurnTree([], 'A'), []);
 
+// Scenario 4: the subagent switch. The panel runs the client copy of this
+// function, so this one has to answer the same way: off by default, hidden when
+// asked, and never handed an empty canvas when hiding would leave nothing.
+const withDelegate = [
+  { sessionId: 'A', createdAt: 1, turns: [{ turn: 1, text: 'Prompt 1', time: 1 }] },
+  { sessionId: 'S', parentSessionId: 'A', createdAt: 2, subagent: true, turns: [{ turn: 1, text: 'delegated', time: 2 }] },
+];
+check('a subagent conversation is drawn by default',
+  buildTurnTree(withDelegate, 'A').some((n) => n.sessionId === 'S'), true);
+check('the subagent switch leaves it out',
+  buildTurnTree(withDelegate, 'A', { hideSubagents: true }).some((n) => n.sessionId === 'S'), false);
+check('the app catalogue alone is enough to leave it out',
+  buildTurnTree([withDelegate[0], Object.assign({}, withDelegate[1], { subagent: undefined })], 'A',
+    { hideSubagents: true, subagentIds: new Set(['S']) }).some((n) => n.sessionId === 'S'), false);
+
+const onlyDelegate = [{ sessionId: 'S', createdAt: 2, subagent: true, turns: [{ turn: 1, text: 'delegated', time: 2 }] }];
+const fallbackOptions = { hideSubagents: true };
+const onlyTree = buildTurnTree(onlyDelegate, 'S', fallbackOptions);
+check('an all-subagent family still draws, and reports the fallback',
+  [onlyTree.length > 0, fallbackOptions.hideSubagentsFellBack === true], [true, true]);
+
 console.log(`
 ${failed === 0 ? 'all passed' : failed + ' failed'}`);
 process.exit(failed === 0 ? 0 : 1);

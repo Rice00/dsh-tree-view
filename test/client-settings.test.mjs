@@ -88,6 +88,7 @@ test('the settings section is named TreeView and explains every row', async (t) 
     'Open the version I was last reading',
     'Stop the reply that is still being written',
     'Hide forks with no new turns',
+    'Hide subagent conversations',
     'Fold long straight stretches',
   ]);
 
@@ -101,5 +102,5 @@ test('the settings section is named TreeView and explains every row', async (t) 
   const intro = view.dom.window.document.querySelector('.mtx-set-intro');
   assert.ok(intro && intro.textContent.length > 40, 'the section opens with a line about what it covers');
   assert.equal(view.selects().length, 2, 'two choices: the control style and the fold threshold');
-  assert.equal(view.toggles().length, 3, 'three switches, and no more');
+  assert.equal(view.toggles().length, 4, 'four switches, and no more');
 });

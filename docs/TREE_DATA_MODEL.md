@@ -46,6 +46,7 @@ Transforms `versions` into an array of turn nodes:
      - If $T > 1$: Turn $T$ hangs off `${parentSessionId}#t${T-1}` (sibling of parent's Turn $T$).
      - Subsequent turns $T+1, T+2, \dots$ hang off the previous turn in the same session (`${sessionId}#t${k-1}`).
 4. **Safety Fallback**: Any node whose computed `parentId` does not exist in the graph is automatically attached to `${rootSessionId}#root`, preventing disconnected subtrees.
+5. **Filters run before layout**: two switches drop versions before any node is built — `dropEmptyForks` (default on) removes photocopies (`v.copy === true`), `hideSubagents` (default off) removes subagent conversations (`v.subagent === true`, or a session the app's own catalogue lists under its parent). If hiding subagents would leave nothing to draw — the reader is inside a subagent conversation — the filter is skipped and the options bag reports `hideSubagentsFellBack`, which is what the canvas turns into a notice.
 
 ### 2.2 Sibling Fan-Out (`attachParentId`)
 *Location: [`lib/tree-logic.js`](../lib/tree-logic.js#L9)*

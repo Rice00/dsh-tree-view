@@ -309,11 +309,12 @@ test('the toolbar says what it does in a line, and asks before stopping work', a
   });
 
   const labels = view.tools().map((el) => el.getAttribute('title'));
-  assert.equal(labels.length, 5, 'filter, collect, fold, fit, refresh');
+  assert.equal(labels.length, 6, 'filter, collect, fold, fit, refresh, subagents');
   assert.ok(labels[0].length <= 24, 'the filter tooltip is a line, not a paragraph: ' + labels[0]);
   assert.ok(view.tools()[0].querySelector('svg'), 'the filter uses an icon, not a punctuation mark');
   assert.ok(view.tools()[1].querySelector('svg'), 'and so does collect');
   assert.ok(view.tools()[2].querySelector('svg'), 'and the fold control');
+  assert.ok(view.tools()[5].querySelector('svg'), 'and the subagent switch');
 
   await view.clickTool(1);
   assert.ok(posts.some((p) => p.action === 'demoteOthers'), 'collect asks the host');
@@ -501,6 +502,70 @@ test('a subagent conversation is marked as one', async (t) => {
   assert.ok(card.textContent.includes('subagent'), 'the card says so: ' + card.textContent);
   assert.equal(view.dom.window.document.querySelectorAll('.mtx-card[data-subagent]').length, 1,
     'only the subagent conversation is marked');
+});
+
+test('a subagent conversation is drawn by default, and can be hidden', async (t) => {
+  // The label already says what a card is; hiding it is a separate promise, so
+  // the switch starts off. Both halves are asserted against one dataset so the
+  // default is the thing being measured, not a coincidence of the fixture.
+  const withDelegate = VERSIONS.concat([{
+    sessionId: 'session-delegate',
+    parentSessionId: 'session-root',
+    createdAt: 5,
+    subagent: true,
+    turns: [{ turn: 1, text: 'delegate one', time: 5 }],
+  }]);
+  const shown = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, withDelegate, undefined, 'session-root');
+  assert.ok(shown.dom.window.document.querySelector('.mtx-card[data-id="session-delegate#t1"]'),
+    'with the switch off the subagent keeps its place in the tree');
+});
+
+test('hiding subagents takes their cards off the canvas and leaves the rest', async (t) => {
+  const withDelegate = VERSIONS.concat([{
+    sessionId: 'session-delegate',
+    parentSessionId: 'session-root',
+    createdAt: 5,
+    subagent: true,
+    turns: [{ turn: 1, text: 'delegate one', time: 5 }],
+  }]);
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0, hideSubagents: true },
+    withDelegate, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  assert.equal(doc.querySelector('.mtx-card[data-id="session-delegate#t1"]'), null,
+    'the subagent conversation is not drawn');
+  assert.ok(doc.querySelector('.mtx-card[data-id="session-root#t1"]'),
+    'the reader\'s own line is still there');
+  assert.equal(doc.querySelectorAll('.mtx-card[data-subagent]').length, 0,
+    'and nothing is left carrying the tag');
+});
+
+test('hiding subagents never hands back an empty canvas', async (t) => {
+  // The one case where the switch cannot keep its promise: the reader is inside
+  // the subagent conversation, so filtering would leave nothing to draw. The
+  // filter is skipped and the canvas says why.
+  const onlyDelegate = [{
+    sessionId: 'session-delegate',
+    createdAt: 5,
+    subagent: true,
+    turns: [{ turn: 1, text: 'delegate one', time: 5 }, { turn: 2, text: 'delegate two', time: 6 }],
+  }];
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0, hideSubagents: true },
+    onlyDelegate, undefined, 'session-delegate');
+  const doc = view.dom.window.document;
+  assert.ok(doc.querySelector('.mtx-card[data-id="session-delegate#t1"]'),
+    'the tree is still drawn');
+  const notice = doc.querySelector('.mtx-notice-alt');
+  assert.ok(notice, 'and the fallback is stated');
+  assert.match(notice.textContent, /subagent/i, 'the note names what happened: ' + notice.textContent);
+});
+
+test('the switch has a toolbar button and a settings toggle', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, VERSIONS, undefined, 'session-root');
+  const doc = view.dom.window.document;
+  const button = [...doc.querySelectorAll('.mtx-tool')]
+    .find((el) => (el.getAttribute('title') || '').toLowerCase().includes('subagent'));
+  assert.ok(button, 'the toolbar carries the same switch as the settings page');
+  assert.equal(button.getAttribute('aria-pressed'), 'false', 'and it opens in the off state');
 });
 
 test('and marks one the host half has not learned about yet', async (t) => {

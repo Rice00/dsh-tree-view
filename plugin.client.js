@@ -249,6 +249,12 @@ const PREFS_DEFAULTS = {
   // On by default, because a photocopy drawn as a branch doubles the canvas; the
   // switch in the Tree panel is there for when you want to see them anyway.
   dropEmptyForks: true,
+  // Hide subagent conversations from the tree. Off by default: the label already
+  // tells a reader that a card is a subagent, and erasing it is a different
+  // promise from marking it. When hiding would leave nothing to draw — the
+  // reader is inside a subagent conversation — the filter is skipped rather than
+  // handing back an empty canvas.
+  hideSubagents: false,
   // Straight stretches longer than this fold into a single node (0 = never
   // fold). That covers the shared history above the first fork and the
   // unbranched run any one branch continues on. A fold node unfolds again, and
@@ -1099,15 +1105,25 @@ function buildTurnTree(versions, currentSessionId, options) {
   const isSubagent = function (v) {
     return v.subagent === true || (subagentIds !== undefined && subagentIds.has(v.sessionId) === true);
   };
-  const kept = versions.filter(function (v) {
+  const keepVersion = function (v, hideSub) {
     // A fork that copied the history and never added a turn of its own is a
     // photocopy: it doubles the canvas and makes the real history look like it
     // forked twice. The switch in the panel decides whether it is drawn — a
     // photocopy has no new content, so it is the switch's business and nothing
     // else's.
+    if (hideSub && isSubagent(v)) return false;
     if (!dropEmptyForks) return true;
     return v.copy !== true;
-  });
+  };
+  const hideSubagents = !!(options && options.hideSubagents);
+  let kept = versions.filter(function (v) { return keepVersion(v, hideSubagents); });
+  // Filtering subagents out can empty the canvas for the one reader who is
+  // inside a subagent conversation. Keep the switch's promise — a readable tree
+  // — over the tidiness, and say so instead of drawing nothing.
+  if (kept.length === 0 && hideSubagents) {
+    kept = versions.filter(function (v) { return keepVersion(v, false); });
+    if (options) options.hideSubagentsFellBack = true;
+  }
   if (kept.length === 0) return [];
   const byId = new Map(kept.map(function (v) { return [v.sessionId, v]; }));
 
@@ -2184,6 +2200,9 @@ const CSS = [
   '.mtx-error{font-size:12px;color:var(--mtx-danger)}',
   '.mtx-graph .mtx-error{position:absolute;left:14px;top:16px;z-index:4}',
   '.mtx-notice{position:absolute;left:14px;right:14px;bottom:34px;z-index:4;pointer-events:none;padding:7px 10px;border-radius:9px;font-size:11.5px;line-height:16px;color:var(--dsw-alias-label-secondary,#bbb);background:color-mix(in srgb,var(--mtx-warn) 14%,var(--mtx-surface));border:1px solid color-mix(in srgb,var(--mtx-warn) 40%,transparent)}',
+  // Two notices can be true at once (a degraded host and a skipped subagent
+  // filter); the second one stacks above the first instead of covering it.
+  '.mtx-notice-alt{bottom:76px}',
 
   // Flash highlight when a graph click lands on its message.
   '@keyframes mtx-flash-kf{0%,55%{background:color-mix(in srgb,var(--mtx-accent) 22%,transparent)}100%{background:transparent}}',
@@ -2367,6 +2386,10 @@ return {
         dropForksLabel: 'Hide forks with no new turns',
         dropForksHint: 'A fork that only copied this conversation and never added a turn of its own is not drawn. The Tree toolbar has the same switch, for when you want to see them.',
         dropForksTool: 'Hide empty forks',
+    hideSubagentsLabel: 'Hide subagent conversations',
+    hideSubagentsHint: 'Conversations a subagent opened are not drawn. The Tree toolbar carries the same switch. If hiding them would leave nothing to draw — because the conversation you are viewing is one of them — the filter is skipped and the canvas says so.',
+    hideSubagentsTool: 'Hide subagent conversations',
+    subagentsFellBack: 'Subagent conversations are hidden, but this tree is one of them, so it is drawn anyway.',
         foldTurns: '{count} shared turns',
         foldRun: '{count} turns in a row',
         foldExpandHint: 'Click to unfold these turns',
@@ -2438,6 +2461,10 @@ return {
         dropForksLabel: '不画没有新内容的副本',
         dropForksHint: '只复制了本对话、自己没聊出新内容的 Fork 不画出来；Tree 工具栏上有同一个开关，想看得时候随手打开。',
         dropForksTool: '不画空副本',
+    hideSubagentsLabel: '不画子代理会话',
+    hideSubagentsHint: '子代理开出来的会话不画在树上；Tree 工具栏上有同一个开关。如果隐藏之后树上什么都不剩（比如你正在看的这条本身就是子代理会话），这一条会跳过过滤，并在画布下方说明。',
+    hideSubagentsTool: '不画子代理会话',
+    subagentsFellBack: '已开启「不画子代理会话」，但当前这条树本身就是子代理会话，所以仍然画出来。',
         foldTurns: '共用历史 · {count} 轮',
         foldRun: '连续 {count} 轮',
         foldExpandHint: '点击展开这几轮',
@@ -2502,6 +2529,25 @@ return {
         }),
         React.createElement('circle', {
           cx: 11.8, cy: 9.4, r: 1.7, fill: 'currentColor', opacity: filtered ? 0.35 : 1,
+        }));
+    }
+
+    /** A parent with one child branch: the subagent this card stands for. */
+    function SubagentIcon(props) {
+      const filtered = props && props.filtered;
+      return React.createElement('svg', {
+        width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
+      },
+        React.createElement('path', {
+          d: 'M4 2.4v5.2h4.2', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
+        }),
+        React.createElement('circle', { cx: 4, cy: 2.4, r: 1.7, fill: 'currentColor' }),
+        React.createElement('circle', {
+          cx: 11.6, cy: 7.6, r: 1.7, fill: 'currentColor', opacity: filtered ? 0.35 : 1,
+        }),
+        React.createElement('path', {
+          d: 'M8.2 7.6h2', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
+          strokeDasharray: filtered ? '2 2.2' : undefined,
         }));
     }
 
@@ -2975,9 +3021,19 @@ return {
       const cardHeights = React.useRef(new Map());
       const measureRef = React.useRef(0);
 
+      const subagentsFellBackRef = React.useRef(false);
       const fullNodes = React.useMemo(function () {
-        return buildTurnTree(versions, sessionId, { dropEmptyForks: prefs.dropEmptyForks, subagentIds: subagentIds });
-      }, [versions, sessionId, prefs.dropEmptyForks, subagentIds]);
+        // The options bag doubles as the report channel: `buildTurnTree` sets
+        // `hideSubagentsFellBack` when the filter would have emptied the canvas.
+        const options = {
+          dropEmptyForks: prefs.dropEmptyForks,
+          hideSubagents: prefs.hideSubagents,
+          subagentIds: subagentIds,
+        };
+        const nodes = buildTurnTree(versions, sessionId, options);
+        subagentsFellBackRef.current = options.hideSubagentsFellBack === true;
+        return nodes;
+      }, [versions, sessionId, prefs.dropEmptyForks, prefs.hideSubagents, subagentIds]);
 
       // Every long straight stretch of the tree — the shared history above the
       // first fork, and the unbranched run any single branch continues on. Only
@@ -4043,7 +4099,18 @@ return {
           React.createElement('button', {
             type: 'button', className: 'mtx-tool', title: t('refresh'),
             onClick: function () { treeStore.load(sessionId); },
-          }, '↻')
+          }, '↻'),
+          // Last in the row on purpose: the buttons before it are the ones a
+          // reader reaches for while steering the canvas, and this switch changes
+          // what the canvas is built from rather than how it is viewed.
+          React.createElement('button', {
+            type: 'button',
+            className: 'mtx-tool',
+            'data-on': prefs.hideSubagents ? '' : undefined,
+            'aria-pressed': prefs.hideSubagents ? 'true' : 'false',
+            title: t('hideSubagentsTool'),
+            onClick: function () { prefsStore.set({ hideSubagents: !prefs.hideSubagents }); },
+          }, SubagentIcon({ filtered: prefs.hideSubagents }))
         ),
         tree && tree.error ? React.createElement('div', { className: 'mtx-error' }, tree.error) : null,
         renameError ? React.createElement('div', { className: 'mtx-error' }, renameError) : null,
@@ -4051,6 +4118,10 @@ return {
         // clicking something that silently does nothing.
         archive.ok ? null : React.createElement('div', { className: 'mtx-notice' },
           t('archivePartial', { parts: archive.missing.join('、') })),
+        // The switch promised a readable tree, and this is the one case it cannot
+        // keep by hiding: say why rather than letting the reader think it broke.
+        subagentsFellBackRef.current ? React.createElement('div', { className: 'mtx-notice mtx-notice-alt' },
+          t('subagentsFellBack')) : null,
         // Tidying up never kills work quietly: a version that is mid-turn gets
         // this question first. Drawn in the panel because the desktop shell
         // implements neither prompt() nor confirm().
@@ -4126,6 +4197,12 @@ return {
           hint: t('dropForksHint'),
           checked: prefs.dropEmptyForks,
           onChange: function (e) { prefsStore.set({ dropEmptyForks: e.target.checked }); },
+        }),
+        React.createElement(Toggle, {
+          label: t('hideSubagentsLabel'),
+          hint: t('hideSubagentsHint'),
+          checked: prefs.hideSubagents,
+          onChange: function (e) { prefsStore.set({ hideSubagents: e.target.checked }); },
         }),
         React.createElement('div', { className: 'mtx-set-row' },
           React.createElement('span', { className: 'mtx-set-label' }, t('foldSharedLabel')),

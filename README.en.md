@@ -40,6 +40,7 @@ Switch the conversation panel to Tree and the whole family is drawn on one canva
 | 🧹 **One-click collect** | The panel toolbar's "collect every other branch" gathers the family's strays into the tree at once, leaving the one you are using. If any of them is still generating a reply it asks first — stop and collect, or cancel — so nothing is killed quietly. |
 | 🗂️ **Folding** | A run of turns with no fork in it — the opening every version shares included — folds into a single node once it reaches the configured length; click to unfold. The threshold is chosen in Settings, the toolbar folds it back at any time, and the view re-frames itself after either. |
 | 🚫 **Hiding empty forks** | Forks that only copied this conversation without adding a turn of their own are not drawn; the toolbar carries the same switch. |
+| 🤖 **Hiding subagent conversations** | Conversations a subagent opened are drawn by default (tagged `subagent`); turn this switch on and they stop taking part in the layout. The toolbar carries the same button. If hiding them would leave nothing to draw — you are reading a subagent conversation yourself — the filter is skipped and the canvas says so. |
 | ✏️ **Renaming branches** | Right-click a node to name a branch. The sidebar title stays the host's own (`(1)`, `(2)` and all) — only the box drawn in the tree is named. |
 | 🔄 **Version ring** | The `‹ n/m ›` ring under a message, to move between versions of the same question without leaving the chat. |
 | 🎯 **Highlighted reading path** | The whole line you are reading — shared opening included — is highlighted on the canvas, so where you came from, where you are and where you can still go read off one picture. |
@@ -168,7 +169,7 @@ See "Versions and compatibility". `engines.dsh` declares `>=0.1.5-rc.2 <0.3.0-0`
 
 ## Settings
 
-Settings → **TreeView**, five rows, each described in the panel:
+Settings → **TreeView**, six rows, each described in the panel:
 
 | Setting | Default | Effect |
 |---|---|---|
@@ -176,6 +177,7 @@ Settings → **TreeView**, five rows, each described in the panel:
 | Open the version I was last reading | `off` | See "Resume where you left off". |
 | Stop the reply that is still being written | `on` | Stop every running reply in the same family (other versions included) before branching, saving quota — and letting you edit mid-reply. |
 | Hide forks with no new turns | `on` | See "Hiding empty forks"; the Tree toolbar carries the same switch. |
+| Hide subagent conversations | `off` | See "Hiding subagent conversations"; the right-most toolbar button is the same switch. If hiding would empty the canvas the filter is skipped and the canvas says so. |
 | Fold long straight stretches | `8 turns and up` | `Never` / `5` / `8` / `12` / `20`, counted per run — see "Folding". |
 
 ## For developers
